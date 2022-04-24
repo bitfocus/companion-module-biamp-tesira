@@ -1,11 +1,31 @@
 {
-  "name": "companion-module-biamp-tesira",
-  "version": "1.0.0",
-  "description": "See HELP.md and LICENSE",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "",
-  "license": "ISC"
+	"name": "biamp-tesira",
+	"version": "1.0.0",
+	"api_version": "1.0.0",
+	"keywords": [
+		"biamp",
+		"tesira",
+		"forte"
+	],
+	"manufacturer": "Biamp",
+	"product": "Tesira",
+	"shortname": "tesira",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bitfocus/companion-module-biamp-tesira.git"
+	},
+	"author": "Adrian Davis <themusicnerd@gmail.com>",
+	"contributors": [
+		"Joseph Adams <josephdadams@gmail.com>","David Stevens <teamjtf4@gmail.com>"
+	],
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/bitfocus/companion-module-biamp-tesira/issues"
+	},
+	"homepage": "https://github.com/bitfocus/companion-module-biamp-tesira#readme"
 }
