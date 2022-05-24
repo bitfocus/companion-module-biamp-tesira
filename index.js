@@ -1,15 +1,13 @@
-// ---------------------------------------------------------
-// Based on the audia module with mostly basic modifications to get it cranking on the Tesira range
-// ---------------------------------------------------------
+// BiAmp Tesira
 
 var tcp = require("../../tcp");
 var instance_skel = require("../../instance_skel");
+const { slice } = require("lodash");
 var debug;
 var log;
 
-// All the setup stuff goes here
 function instance(system, id, config) {
-  var self = this;
+  let self = this;
 
   // super-constructor
   instance_skel.apply(this, arguments);
@@ -19,35 +17,36 @@ function instance(system, id, config) {
   return self;
 }
 
+instance.prototype.TIMER_FADER = null;
+
 instance.prototype.updateConfig = function (config) {
-  var self = this;
+  let self = this;
 
   self.config = config;
+  self.initPresets();
   self.init_tcp();
 };
 
 instance.prototype.init = function () {
-  var self = this;
+  let self = this;
 
-  debug = self.debug;
-  log = self.log;
-
-  self.status(1, "Connecting"); // status ok!
-
+  debug = console.log;
+  log = console.log;
+  self.initPresets();
   self.init_tcp();
 };
 
-// All the TCP communication stuff startup goes next
-
 instance.prototype.init_tcp = function () {
-  var self = this;
+  let self = this;
 
   if (self.socket !== undefined) {
     self.socket.destroy();
     delete self.socket;
   }
 
-  if (self.config.host) {
+  self.config.port = 23;
+
+  if (self.config.host && self.config.port) {
     self.socket = new tcp(self.config.host, self.config.port);
 
     self.socket.on("status_change", function (status, message) {
@@ -56,1385 +55,519 @@ instance.prototype.init_tcp = function () {
 
     self.socket.on("error", function (err) {
       debug("Network error", err);
-      self.status(self.STATE_ERROR, err);
       self.log("error", "Network error: " + err.message);
     });
 
     self.socket.on("connect", function () {
-      self.status(self.STATE_OK);
-      debug("Connected");
+      debug("Socket Connected");
     });
-
-    self.socket.on("data", function (data) {});
+  } else {
+    self.log("error", "Please specify host in config.");
   }
 };
 
-// Return config fields for web config - This stuff is for the module EDIT config page in companion
-instance.prototype.config_fields = function () {
+instance.prototype.initPresets = function () {
   var self = this;
+  var presets = [];
+
+  presets.push({
+    category: "Fader Level",
+    label: "Inc Fader",
+    bank: {
+      style: "text",
+      text: "Fader +",
+      size: "14",
+      color: "16777215",
+      bgcolor: self.rgb(0, 0, 0),
+    },
+    actions: [
+      {
+        action: "incFaderLevelTimer",
+        options: {
+          rate: "200",
+          command: "increment",
+          instanceID: "Level1",
+          amount: 1,
+        },
+      },
+    ],
+    release_actions: [
+      {
+        action: "incFaderLevelStop",
+      },
+    ],
+  });
+
+  presets.push({
+    category: "Fader Level",
+    label: "Dec Fader",
+    bank: {
+      style: "text",
+      text: "Fader -",
+      size: "14",
+      color: "16777215",
+      bgcolor: self.rgb(0, 0, 0),
+    },
+    actions: [
+      {
+        action: "incFaderLevelTimer",
+        options: {
+          rate: "200",
+          command: "decrement",
+          instanceID: "Level1",
+          amount: 1,
+        },
+      },
+    ],
+    release_actions: [
+      {
+        action: "incFaderLevelStop",
+      },
+    ],
+  });
+
+  presets.push({
+    category: "Mute",
+    label: "Mute",
+    bank: {
+      style: "text",
+      text: "Mute",
+      size: "14",
+      color: "16777215",
+      bgcolor: self.rgb(0, 0, 0),
+    },
+    actions: [
+      {
+        action: "faderMute",
+        options: {
+          instanceID: "Mute1",
+          channel: 1,
+          status: "Mute",
+        },
+      },
+    ],
+    release_actions: [
+      {
+        action: "faderMute",
+        options: {
+          instanceID: "Mute1",
+          channel: 1,
+          status: "Unmute",
+        },
+      },
+    ],
+  });
+
+  presets.push({
+    category: "Fader Level",
+    label: "Set Fader To Level",
+    bank: {
+      style: "text",
+      text: "Fader1 Set To 0db",
+      size: "14",
+      color: "16777215",
+      bgcolor: self.rgb(0, 0, 0),
+    },
+    actions: [
+      {
+        action: "setFaderLevel",
+        options: {
+          instanceID: "Level1",
+          channel: 1,
+          level: 0,
+        },
+      },
+    ],
+    release_actions: [
+      {
+        action: "incFaderLevelStop",
+      },
+    ],
+  });
+
+  self.setPresetDefinitions(presets);
+};
+
+// Return config fields for web config
+instance.prototype.config_fields = function () {
+  let self = this;
+
   return [
     {
-      type: "textinput",
-      id: "host",
-      label: "Target IP",
-      width: 6,
-      regex: self.REGEX_IP,
+      type: "text",
+      id: "info",
+      label: "",
+      width: 12,
+      value: `
+				<div class="alert alert-danger">
+					<h4>ACTION REQUESTS</h4>
+					<div>
+						<strong>If you want to use an action that requires the use of a custom command, please submit a issue request to the module repo with the action that you would like added to the module.</strong>
+						<a href="https://github.com/bitfocus/companion-module-biamp-tesira/issues" target="_new" class="btn btn-success">Module Issues Page</a>
+					</div>
+				</div>
+			`,
+    },
+    {
+      type: "text",
+      id: "info",
+      width: 12,
+      label: "Information",
+      value: "This module will connect to a BiAmp Tesira Processor.",
     },
     {
       type: "textinput",
-      id: "port",
-      label: "Target Port",
-      witdth: 6,
-      default: 23,
-      regex: self.REGEX_PORT,
+      id: "host",
+      label: "IP Address",
+      width: 6,
+      default: "192.168.0.1",
+      regex: self.REGEX_IP,
     },
   ];
 };
 
-// Do this when the module gets deleted
+// When module gets deleted
 instance.prototype.destroy = function () {
-  var self = this;
+  let self = this;
 
   if (self.socket !== undefined) {
     self.socket.destroy();
   }
 
+  //destroy timers
+  if (self.TIMER_FADER !== null) {
+    clearInterval(this.TIMER_FADER);
+    self.TIMER_FADER = null;
+  }
+
   debug("destroy", self.id);
 };
 
-// These are the options that the end-user can select when creating buttons and automations
+instance.prototype.actions = function () {
+  let self = this;
 
-instance.prototype.actions = function (system) {
-  var self = this;
-
-  self.system.emit("instance_actions", self.id, {
-    // Preset Recall
-    "recall-preset": {
-      label: "Recall a preset",
+  self.setActions({
+    setFaderLevel: {
+      label: "Set Fader Level",
       options: [
         {
-          type: "dropdown",
-          label: "Direction",
-          id: "action",
-          choices: [
-            { id: "recallPreset", label: "Recall By ID (1001 or higher)" },
-            { id: "recallPresetByName", label: "Recall By Name" },
-          ],
+          type: "textinput",
+          id: "instanceID",
+          label: "Instance ID",
+          tooltip: "Insert instance ID",
+          default: "Level1",
+          width: 6,
         },
         {
           type: "textinput",
-          label: "Preset Name or ID",
-          id: "value",
-          regex: self.REGEX_NUMBER,
+          id: "channel",
+          label: "Channel",
+          tooltip: "Insert Channel",
+          default: "1",
+          width: 6,
+        },
+        {
+          type: "number",
+          label: "Level",
+          id: "level",
+          min: -100,
+          max: 12,
+          default: 0,
+          required: true,
+          range: true,
         },
       ],
     },
-
-    // Fader Control - inc dec
-    "fader-step": {
-      label: "[Fader] Increment/Decrement",
+    incFaderLevel: {
+      label: "Increment/Decrement Fader Level",
       options: [
         {
-          type: "textinput",
-          label: "Instance tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
           type: "dropdown",
-          label: "Direction",
-          id: "action",
+          label: "Command",
+          id: "command",
           choices: [
             { id: "increment", label: "Increment" },
             { id: "decrement", label: "Decrement" },
           ],
+          default: "increment",
         },
         {
           type: "textinput",
-          label: "Amount",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-
-    // Fader Control - set the level value directly
-    "fader-set": {
-      label: "[Fader] set",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
+          id: "instanceID",
+          label: "Instance ID",
+          tooltip: "Insert instance ID",
+          default: "Level1",
+          width: 6,
         },
         {
           type: "textinput",
+          id: "channel",
           label: "Channel",
-          id: "index1",
+          tooltip: "Insert Channel",
+          default: "1",
+          width: 6,
+        },
+        {
+          type: "textinput",
+          label: "Increment/Decrement Amount",
+          id: "amount",
           default: 1,
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Value",
-          id: "value",
-          regex: self.REGEX_NUMBER,
+          required: true,
         },
       ],
     },
-
-    // fader mute
-    "fadermute-set": {
-      label: "[Fader] set Mute",
+    incFaderLevelTimer: {
+      label: "Increase Fader Level 1 Point Continuously",
       options: [
         {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
+          type: "number",
+          label: "Rate",
+          id: "rate",
+          default: "500",
+          tooltip: "Time in milliseconds between increases",
+        },
+        {
+          type: "dropdown",
+          label: "Command",
+          id: "command",
+          choices: [
+            { id: "increment", label: "Increment" },
+            { id: "decrement", label: "Decrement" },
+          ],
+          default: "increment",
         },
         {
           type: "textinput",
+          id: "instanceID",
+          label: "Instance ID",
+          tooltip: "Insert instance ID",
+          default: "Level1",
+          width: 6,
+        },
+        {
+          type: "textinput",
+          id: "channel",
           label: "Channel",
-          id: "index1",
+          tooltip: "Insert Channel",
+          default: "1",
+          width: 6,
+        },
+        {
+          type: "textinput",
+          label: "Increment/Decrement Amount",
+          id: "amount",
           default: 1,
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Unmuted" },
-            { id: "true", label: "Muted" },
-          ],
+          required: true,
         },
       ],
     },
-
-    // mute in blocks that support mute
-    "mutebutton-set": {
-      label: "[Mute] set Mute",
+    incFaderLevelStop: {
+      label: "Stop Increasing Fader Level",
+    },
+    faderMute: {
+      label: "Fader Mute",
       options: [
         {
           type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
+          id: "instanceID",
+          label: "Instance ID",
+          tooltip: "Insert instance ID",
+          default: "Level1",
+          width: 6,
         },
         {
           type: "textinput",
+          id: "channel",
           label: "Channel",
-          id: "index1",
-          default: 1,
-          regex: self.REGEX_NUMBER,
+          tooltip: "Insert Channel",
+          default: "1",
+          width: 6,
         },
         {
           type: "dropdown",
-          label: "State",
-          id: "value",
+          label: "Status",
+          id: "muteStatus",
           choices: [
-            { id: "false", label: "Unmuted" },
-            { id: "true", label: "Muted" },
+            { id: "true", label: "Mute" },
+            { id: "false", label: "Unmute" },
           ],
+          default: "true",
         },
       ],
     },
-
-    // Router set output to input
-    "router-set": {
-      label: "[Router] set Crosspoint",
+    customCommand: {
+      label: "Custom Command",
       options: [
         {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Output",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Input",
-          id: "index2",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-
-    // Source Block Select
-    "source-set": {
-      label: "[Source Selection] set Source",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Source",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-
-    // Source Volume Set (per input)
-    "sourcevolume-set": {
-      label: "[Source Selection] set Input Volume",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Input",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-
-    // Leveler/Compressor/Peak Limiter/Ducker/Noise Gate/AGC Bypass
-    "leveler-set": {
-      label: "Leveler/Compressor/Peak Limiter/Ducker/Noise Gate/AGC set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-
-    // input level set for all blocks
-    "inputlevel-set": {
-      label: "Input Level",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-        },
-      ],
-    },
-
-    // level sence set - for dynamics processor - ducker
-    "duckerlevelsense-set": {
-      label: "[Ducker] set Level Sense",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-        },
-      ],
-    },
-
-    // MUTE - set ducker sence mute
-    "duckersensemute-set": {
-      label: "[Ducker] set Sense Mute",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Unmuted" },
-            { id: "true", label: "Muted" },
-          ],
-        },
-      ],
-    },
-
-    // MUTE - set input mute
-    "inputmute-set": {
-      label: "[Input] set Mute",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Unmuted" },
-            { id: "true", label: "Muted" },
-          ],
-        },
-      ],
-    },
-
-    // ----------------------------------------------------------------------------------
-    // This is for next revision
-    // ----------------------------------------------------------------------------------
-
-    "xover2-set": {
-      label: "[2-Way Crossover] Edit",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Filter Point",
-          id: "index1",
-          choices: [
-            { id: "1", label: "Low-Pass Cutoff" },
-            { id: "2", label: "High-Pass Cutoff" },
-          ],
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "xover3-set": {
-      label: "[3-Way Crossover] Edit",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Filter Point",
-          id: "index1",
-          choices: [
-            { id: "1", label: "Low-Pass Cutoff" },
-            { id: "2", label: "Middle Low Cutoff" },
-            { id: "3", label: "Middle High Cutoff" },
-            { id: "2", label: "High-Pass Cutoff" },
-          ],
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "xover4-set": {
-      label: "[4-Way Crossover] Edit",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Filter Point",
-          id: "index1",
-          choices: [
-            { id: "1", label: "Low-Pass Cutoff" },
-            { id: "2", label: "Low-Mid Low Cutoff" },
-            { id: "3", label: "Low-Mid High Cutoff" },
-            { id: "4", label: "High-Mid Low Cutoff" },
-            { id: "5", label: "High-Mid High Cutoff" },
-            { id: "6", label: "High-Pass Cutoff" },
-          ],
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "hpfcutoff-set": {
-      label: "[HPF] set Cutoff",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "hpfbypass-set": {
-      label: "[HPF] set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "lpfcutoff-set": {
-      label: "[LPF] set Cutoff",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "lpfbypass-set": {
-      label: "[LPF] set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-
-    "highshelfcutoff-set": {
-      label: "[High Shelf] set Cutoff",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "highshelfgain-set": {
-      label: "[High Shelf] set Gain",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Gain",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "highshelfbypass-set": {
-      label: "[High Shelf] set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "lowshelfcutoff-set": {
-      label: "[Low Shelf] set Cutoff",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "lowshelfgain-set": {
-      label: "[Low Shelf] set Gain",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Gain",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "lowshelfbypass-set": {
-      label: "[Low Shelf] set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "allpassbypass-set": {
-      label: "[All Pass] set Bypass (All)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "allpassbypassband-set": {
-      label: "[All Pass] set Bypass (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "allpasscenter-set": {
-      label: "[All Pass] set Center (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "allpassbw-set": {
-      label: "[All Pass] set Bandwidth (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Bandwidth",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "geqlevel-set": {
-      label: "[GEQ] set Level (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "geqbypass-set": {
-      label: "[GEQ] set Bypass",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "peqbypass-set": {
-      label: "[PEQ] set Bypass (All)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "peqbypassband-set": {
-      label: "[PEQ] set Bypass (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Active" },
-            { id: "true", label: "Bypassed" },
-          ],
-        },
-      ],
-    },
-    "peqcenter-set": {
-      label: "[PEQ] set Center (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Frequency",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "peqpassbw-set": {
-      label: "[PEQ] set Bandwidth (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Bandwidth",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    "peqlevel-set": {
-      label: "[PEQ] set Level (Band)",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Band",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-    // ----------------------------------------------------------------------------------
-    // Aaaaand were back into things for v1.0
-    // ----------------------------------------------------------------------------------
-
-    // Gain set for any analogiue input block that has a gain control
-    "gain-set": {
-      label: "[Input] set Gain",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Gain",
-          id: "value",
-          choices: [
-            { id: "0", label: "0 dB" },
-            { id: "6", label: "6 dB" },
-            { id: "12", label: "12 dB" },
-            { id: "18", label: "18 dB" },
-            { id: "24", label: "24 dB" },
-            { id: "30", label: "30 dB" },
-            { id: "36", label: "36 dB" },
-            { id: "42", label: "42 dB" },
-            { id: "48", label: "48 dB" },
-            { id: "54", label: "54 dB" },
-            { id: "60", label: "60 dB" },
-            { id: "66", label: "66 dB" },
-          ],
-        },
-      ],
-    },
-    // Level set for any block that has a level control
-    "level-set": {
-      label: "[Level] set Level",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Level",
-          id: "value",
-          regex: self.REGEX_NUMBER,
-        },
-      ],
-    },
-
-    // Phantom Power set for any analogue input block that can supply phantom power
-    "phantom-set": {
-      label: "[Input] set Phantom Power",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Chanel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "State",
-          id: "value",
-          choices: [
-            { id: "false", label: "Off" },
-            { id: "true", label: "On" },
-          ],
-        },
-      ],
-    },
-
-    // Phase Invert / Polarity Invert / Phase Flip - you know the deal - get the phase right on inputs
-    "polarity-set": {
-      label: "[Analog In] set Polarity",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Polarity",
-          id: "value",
-          choices: [
-            { id: "false", label: "Normal" },
-            { id: "true", label: "Inverted" },
-          ],
-        },
-      ],
-    },
-
-    // Turn AEC on and off
-    "aecenable-set": {
-      label: "[AEC] Enable AEC",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "AEC",
-          id: "value",
-          choices: [
-            { id: "false", label: "Off" },
-            { id: "true", label: "On" },
-          ],
-        },
-      ],
-    },
-
-    // AEC Set Non-linear Processing stregnth
-    "aecnlp-set": {
-      label: "[AEC] NLP Strength",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "NLP Mode",
-          id: "value",
-          choices: [
-            { id: "NLPMODE_NONE", label: "None" },
-            { id: "NLPMODE_LOW", label: "Low" },
-            { id: "NLPMODE_MEDIUM", label: "Medium" },
-            { id: "NLPMODE_HIGH", label: "High" },
-          ],
-        },
-      ],
-    },
-
-    // AEC Set Noise Reduction Stregnth
-    "aecnr-set": {
-      label: "[AEC] Noise Reduction Strength",
-      options: [
-        {
-          type: "textinput",
-          label: "Instance Tag",
-          id: "instance",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "textinput",
-          label: "Channel",
-          id: "index1",
-          regex: self.REGEX_NUMBER,
-        },
-        {
-          type: "dropdown",
-          label: "Strength",
-          id: "AEC",
-          choices: [
-            { id: "OFF", label: "None" },
-            { id: "LOW", label: "Low" },
-            { id: "MED", label: "Medium" },
-            { id: "HIGH", label: "High" },
-          ],
+          type: "text",
+          id: "info",
+          width: 12,
+          label:
+            "BiAmp has created a command calculator to create custom command strings for the Tesira controllers. Unless you know what you are doing, it is strongly recommended that you use the calculator to create your command.",
+          value: "",
+        },
+        {
+          type: "text",
+          id: "info",
+          width: 12,
+          label:
+            "The calculator can be found here: https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator",
+          value: "",
+        },
+        {
+          type: "textinput",
+          id: "command",
+          label: "Command",
+          tooltip: "Insert Command Here",
+          default: "1",
+          width: 6,
         },
       ],
     },
   });
 };
 
-// These are the functions that define the first part of the final command
 instance.prototype.action = function (action) {
-  var self = this;
-  var opt = action.options;
+  let self = this;
+  let cmd;
+  let options = action.options;
+  let muteInt;
+
+  console.log("Tesira Command Sent:");
 
   switch (action.action) {
-    case "recall":
-      opt.action = "recallPreset";
-      opt.attribute = "recallPreset";
+    case "setFaderLevel":
+      cmd =
+        options.instanceID +
+        " " +
+        "set" +
+        " " +
+        "level" +
+        " " +
+        options.channel +
+        " " +
+        options.level;
+      console.log(cmd);
       break;
-
-    case "fader-step":
-      opt.attribute = "level";
+    case "faderMute":
+      cmd =
+        options.instanceID +
+        " " +
+        "set" +
+        " " +
+        "mute" +
+        " " +
+        options.channel +
+        " " +
+        options.muteStatus;
+      console.log(cmd);
       break;
-
-    case "fader-set":
-      opt.action = "set";
-      opt.attribute = "level";
+    case "incFaderLevelTimer":
+      self.Fader_Timer(
+        "start",
+        options.rate,
+        options.command,
+        options.deviceID,
+        options.instanceID,
+        options.channel,
+        options.amount
+      );
       break;
-
-    case "mutebutton-set":
-      opt.action = "set";
-      opt.attribute = "mute";
-      break;
-
-    case "fadermute-set":
-      opt.action = "set";
-      opt.attribute = "mute";
-      break;
-
-    case "router-set":
-      opt.action = "set";
-      opt.attribute = "input";
-      break;
-
-    case "source-set":
-      opt.action = "set";
-      opt.attribute = "sourceSelection";
-      break;
-
-    case "sourcevolume-set":
-      opt.action = "set";
-      opt.attribute = "sourceLevel";
-      break;
-
-    case "leveler-set":
-      opt.action = "set";
-      opt.attribute = "bypass";
-      break;
-
-    case "comp-set":
-      opt.action = "set";
-      opt.attribute = "bypass";
-      break;
-
-    case "noise-set":
-      opt.action = "set";
-      opt.attribute = "bypass";
-      break;
-
-    case "inputlevel-set":
-      opt.action = "set";
-      opt.attribute = "inputLevel";
-      break;
-
-    case "duckerlevelsense-set":
-      opt.action = "set";
-      opt.attribute = "senseLevel";
-      break;
-
-    case "duckersensemute-set":
-      opt.action = "set";
-      opt.attribute = "senseMute";
-      break;
-
-    case "inputmute-set":
-      opt.action = "set";
-      opt.attribute = "inputMute";
-      break;
-    // ---------------------------------------------------------
-    // Stuff for a future revision
-    // ---------------------------------------------------------
-
-    case "xover2-set":
-      opt.action = "set";
-      opt.attribute = "XOVER2FC";
-      break;
-
-    case "xover3-set":
-      opt.action = "set";
-      opt.attribute = "XOVER3FC";
-      break;
-
-    case "xover4-set":
-      opt.action = "set";
-      opt.attribute = "XOVER4FC";
-      break;
-
-    case "hpfcutoff-set":
-      opt.action = "set";
-      opt.attribute = "HPFLTFC";
-      break;
-
-    case "hpfbypass-set":
-      opt.action = "set";
-      opt.attribute = "HPFLTBYP";
-      break;
-
-    case "lpfcutoff-set":
-      opt.action = "set";
-      opt.attribute = "LPFLTFC";
-      break;
-
-    case "lpfbypass-set":
-      opt.action = "set";
-      opt.attribute = "LPFLTBYP";
-      break;
-
-    case "highshelfcutoff-set":
-      opt.action = "set";
-      opt.attribute = "HSFLTFC";
-      break;
-
-    case "highshelfgain-set":
-      opt.action = "set";
-      opt.attribute = "HSFLTGAIN";
-      break;
-
-    case "highshelfbypass-set":
-      opt.action = "set";
-      opt.attribute = "HSFLTBYP";
-      break;
-
-    case "lowshelfcutoff-set":
-      opt.action = "set";
-      opt.attribute = "LSFLTFC";
-      break;
-
-    case "lowshelfgain-set":
-      opt.action = "set";
-      opt.attribute = "LSFLTGAIN";
-      break;
-
-    case "lowshelfbypass-set":
-      opt.action = "set";
-      opt.attribute = "LSFLTBYP";
-      break;
-
-    case "allpassbypass-set":
-      opt.action = "set";
-      opt.attribute = "APFLBYPALL";
-      break;
-
-    case "allpassbypassband-set":
-      opt.action = "set";
-      opt.attribute = "APFLTBYPBND";
-      break;
-
-    case "allpasscenter-set":
-      opt.action = "set";
-      opt.attribute = "APFLBYPBND";
-      break;
-
-    case "allpassbw-set":
-      opt.action = "set";
-      opt.attribute = "APFLTBWBND";
-      break;
-
-    case "geqlevel-set":
-      opt.action = "set";
-      opt.attribute = "GEQLVLBND";
-      break;
-
-    case "geqbypass-set":
-      opt.action = "set";
-      opt.attribute = "GEQBYPALL";
-      break;
-
-    case "peqbypass-set":
-      opt.action = "set";
-      opt.attribute = "PEQBYPALL";
-      break;
-
-    case "peqbypassband-set":
-      opt.action = "set";
-      opt.attribute = "PEQBYPBND";
-      break;
-
-    case "peqcenter-set":
-      opt.action = "set";
-      opt.attribute = "PEQFCBND";
-      break;
-
-    case "peqbw-set":
-      opt.action = "set";
-      opt.attribute = "PEQBWBND";
-      break;
-
-    case "peqlevel-set":
-      opt.action = "set";
-      opt.attribute = "PEQLVLBND";
-      break;
-
-    // ---------------------------------------------------------
-    // And we're back to stuff for current revision
-    // ---------------------------------------------------------
-
-    case "gain-set":
-      opt.action = "set";
-      opt.attribute = "gain";
-      break;
-
-    case "level-set":
-      opt.action = "set";
-      opt.attribute = "level";
-      break;
-
-    case "phantom-set":
-      opt.action = "set";
-      opt.attribute = "phantomPower";
-      break;
-
-    case "polarity-set":
-      opt.action = "set";
-      opt.attribute = "invert";
-      break;
-
-    case "aecenable-set":
-      opt.action = "set";
-      opt.attribute = "aecEnable";
-      break;
-
-    case "aecnlp-set":
-      opt.action = "set";
-      opt.attribute = "nlpMode";
-      break;
-
-    case "aecnr-set":
-      opt.action = "set";
-      opt.attribute = "nlpMode";
+    case "incFaderLevelStop":
+      self.Fader_Timer("increase", "stop", null);
+    case "customCommand":
+      cmd = options.command;
       break;
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // OLD AUDIA
-  // 	   cmd = opt.action opt.device opt.attribute opt.instance opt.index1 opt.index2 opt.value
-  // eg  cmd = set 0 MBMUTE 99 1 1
-  //
-  //		action = get/set/etc
-  //		device = deviceid (not needed for tesira)
-  //		attribute = MBMUTE SETLEVEL etc
-  //		instance = insatance ID of block
-  //		opt.index1 = what channel you want to controllers
-  //		opt.index2 = 2nd index to controllers (used for things like routers)
-  //		opt.value = what the value is
-  //
-  // NEW TESIRA
-  //		https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator
-  //		instance(ID or name) action attribute index1 (index2) Value
-  //		cmd = `${opt.instance} ${opt.action} ${opt.attribute}`
-  //
-  // ---------------------------------------------------------------------------------------------
-  if (opt.action && opt.device && opt.attribute) {
-    let cmd = `${opt.instance} ${opt.action} ${opt.attribute}`;
-    if (opt.index1) {
-      cmd = cmd + " " + opt.index1;
-    }
-    if (opt.index2) {
-      cmd = cmd + " " + opt.index2;
-    }
-    if (opt.value) {
-      cmd = cmd + " " + opt.value;
-    }
-
-    debug(`Sending "${cmd}" to ${self.config.host}`);
-
+  if (cmd !== undefined) {
     if (self.socket !== undefined && self.socket.connected) {
-      self.socket.send(cmd + "\n");
+      self.socket.send(cmd + "\r\n");
+      debug("Sent Command: " + cmd);
     } else {
       debug("Socket not connected :(");
     }
+  } else {
+    self.log("error", "Invalid command: " + cmd);
+  }
+};
+
+instance.prototype.Fader_Change = function (
+  command,
+  deviceID,
+  instanceID,
+  channel,
+  amount
+) {
+  let self = this;
+
+  cmd =
+    instanceID + " " + command + " " + "level" + " " + channel + " " + amount;
+
+  if (cmd !== undefined) {
+    if (self.socket !== undefined && self.socket.connected) {
+      self.socket.send(cmd + "\r\n");
+      debug("Sent Command: " + cmd);
+    } else {
+      debug("Socket not connected :(");
+    }
+  } else {
+    self.log("error", "Invalid command: " + cmd);
+  }
+};
+
+instance.prototype.Fader_Timer = function (
+  mode,
+  rate,
+  command,
+  deviceID,
+  instanceID,
+  channel,
+  amount
+) {
+  let self = this;
+
+  if (self.TIMER_FADER !== null) {
+    clearInterval(self.TIMER_FADER);
+    self.TIMER_FADER = null;
+  }
+
+  if (mode === "start") {
+    self.TIMER_FADER = setInterval(
+      self.Fader_Change.bind(self),
+      parseInt(rate),
+      command,
+      deviceID,
+      instanceID,
+      channel,
+      amount
+    );
   }
 };
 
 instance_skel.extendedBy(instance);
 exports = module.exports = instance;
+
+// ---------------------------------------------------------------------------------------------
+// OLD AUDIA
+// 	   cmd = opt.action opt.device opt.attribute opt.instance opt.index1 opt.index2 opt.value
+// eg  cmd = set 0 MBMUTE 99 1 1
+//
+//		action = get/set/etc
+//		device = deviceid (not needed for tesira)
+//		attribute = MBMUTE SETLEVEL etc
+//		instance = insatance ID of block
+//		opt.index1 = what channel you want to controllers
+//		opt.index2 = 2nd index to controllers (used for things like routers)
+//		opt.value = what the value is
+//
+// NEW TESIRA
+//		https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator
+//		instance(ID or name) action attribute index1 (index2) Value
+//		cmd = `${opt.instance} ${opt.action} ${opt.attribute}`
+// eg cmd = Mute1 set mute 1 true
+//          ID    set atrib
+//
+// Instance Tag		Command		Attribute	Index	Index				Value
+// MyLevel1			subscribe	level		1		MyLevelCustomLabel	500
+// ---------------------------------------------------------------------------------------------
