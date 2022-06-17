@@ -430,6 +430,19 @@ instance.prototype.actions = function () {
         },
       ],
     },
+    recallPreset: {
+      label: "Recall Preset",
+      options: [
+        {
+          type: "textinput",
+          id: "presetID",
+          label: "Preset ID",
+          tooltip: "Insert preset ID",
+          default: "1001",
+          width: 6,
+        }
+      ],
+    },
     customCommand: {
       label: "Custom Command",
       options: [
@@ -510,6 +523,11 @@ instance.prototype.action = function (action) {
       break;
     case "incFaderLevelStop":
       self.Fader_Timer("increase", "stop", null);
+      break;
+    case "recallPreset":
+      cmd = "DEVICE recallPreset " + 
+      options.presetID;
+      break;
     case "customCommand":
       cmd = options.command;
       break;
