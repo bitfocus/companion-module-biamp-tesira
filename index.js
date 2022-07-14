@@ -2,6 +2,7 @@
 
 var tcp = require("../../tcp");
 var instance_skel = require("../../instance_skel");
+var TelnetSocket = require('../../telnet');
 const { slice } = require("lodash");
 var debug;
 var log;
@@ -36,6 +37,23 @@ instance.prototype.init = function () {
   self.init_tcp();
 };
 
+//based on code from the extron smx module -- 
+//process data received from the telnet connection
+instance.prototype.incomingData = function(data) {
+	var self = this;
+	debug(data);
+
+	// Match part of the response from unit when a connection is made.
+	if (self.login === false && data.match(/Welcome to the Tesira Text Protocol Server/)) {
+		self.status(self.STATUS_OK);
+		debug("Logged in");
+	}
+//
+// can likely capture feedback from the device here also to set variables / status??
+// if keepalive is necessary, it can go here as well
+//
+};
+
 instance.prototype.init_tcp = function () {
   let self = this;
 
@@ -47,7 +65,7 @@ instance.prototype.init_tcp = function () {
   self.config.port = 23;
 
   if (self.config.host && self.config.port) {
-    self.socket = new tcp(self.config.host, self.config.port);
+    self.socket = new TelnetSocket(self.config.host, self.config.port);
 
     self.socket.on("status_change", function (status, message) {
       self.status(status, message);
@@ -64,6 +82,23 @@ instance.prototype.init_tcp = function () {
   } else {
     self.log("error", "Please specify host in config.");
   }
+    //capture incoming data
+    self.socket.on("data", function(buffer) {
+      var indata = buffer.toString("utf8");
+      self.incomingData(indata);
+    });
+    //respond to telnet option negotiation, decline everything
+    self.socket.on("iac", function(type, info) {
+			// tell remote we WONT do anything we're asked to DO
+			if (type == 'DO') {
+				self.socket.write(Buffer.from([ 255, 252, info ]));
+			}
+
+			// tell the remote DONT do whatever they WILL offer
+			if (type == 'WILL') {
+				self.socket.write(Buffer.from([ 255, 254, info ]));
+			}
+		});
 };
 
 instance.prototype.initPresets = function () {
@@ -395,6 +430,19 @@ instance.prototype.actions = function () {
         },
       ],
     },
+    recallPreset: {
+      label: "Recall Preset",
+      options: [
+        {
+          type: "textinput",
+          id: "presetID",
+          label: "Preset ID",
+          tooltip: "Insert preset ID",
+          default: "1001",
+          width: 6,
+        }
+      ],
+    },
     customCommand: {
       label: "Custom Command",
       options: [
@@ -475,6 +523,11 @@ instance.prototype.action = function (action) {
       break;
     case "incFaderLevelStop":
       self.Fader_Timer("increase", "stop", null);
+      break;
+    case "recallPreset":
+      cmd = "DEVICE recallPreset " + 
+      options.presetID;
+      break;
     case "customCommand":
       cmd = options.command;
       break;
