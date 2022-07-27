@@ -48,10 +48,29 @@ instance.prototype.incomingData = function(data) {
 		self.status(self.STATUS_OK);
 		debug("Logged in");
 	}
-//
-// can likely capture feedback from the device here also to set variables / status??
-// if keepalive is necessary, it can go here as well
-//
+
+//capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
+//regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
+
+if (data.match(/! \"publishToken\":\"\w*\" \"value\":.*/)) {
+  match = data.match(/! \"publishToken\":\"(\w*)\" \"value\":(.*)/);
+  
+  //remove all the useless trailing zeros from number values
+  value = match[2];
+  if (value.indexOf('.') > 0) {
+    value = value.slice(0,value.indexOf('.'));
+  }
+  
+  self.setVariable(match[1],value);
+  console.log("variable set - "+ match[1] + " = " + value);
+
+ //TO DO:  figure this out -- only set variable definitions one time when a new variable is first created
+ // I believe the name must match the var-name, and description should just be 'return value from tesira'
+
+  //self.setVariableDefinitions(newvar); I *think* newvar needs to be an object in the form {name: <varname>,label: 'return value from tesira'}
+}
+
+
 };
 
 instance.prototype.init_tcp = function () {
@@ -100,6 +119,11 @@ instance.prototype.init_tcp = function () {
 			}
 		});
 };
+//instance.prototype.addVariable = function (testvar) { // this causes a crash!
+//  var self = this;
+//  test = self.getVariable(testvar);
+//  console.log("checking new variable -->" + test);
+//TO DO:  find a way to manage the custom variables that we're setting up based on return values from tesira.  add definitions so that they show up to the user
 
 instance.prototype.initPresets = function () {
   var self = this;
@@ -531,6 +555,17 @@ instance.prototype.action = function (action) {
     case "customCommand":
       cmd = options.command;
       break;
+    case "incFaderLevel":
+      cmd = options.instanceID +
+      " " +
+      options.command +
+      " " +
+      "level" +
+      " " +
+      options.channel +
+      " " +
+      options.amount;
+      break;
   }
 
   if (cmd !== undefined) {
@@ -601,19 +636,7 @@ instance.prototype.Fader_Timer = function (
 instance_skel.extendedBy(instance);
 exports = module.exports = instance;
 
-// ---------------------------------------------------------------------------------------------
-// OLD AUDIA
-// 	   cmd = opt.action opt.device opt.attribute opt.instance opt.index1 opt.index2 opt.value
-// eg  cmd = set 0 MBMUTE 99 1 1
-//
-//		action = get/set/etc
-//		device = deviceid (not needed for tesira)
-//		attribute = MBMUTE SETLEVEL etc
-//		instance = insatance ID of block
-//		opt.index1 = what channel you want to controllers
-//		opt.index2 = 2nd index to controllers (used for things like routers)
-//		opt.value = what the value is
-//
+
 // NEW TESIRA
 //		https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator
 //		instance(ID or name) action attribute index1 (index2) Value
