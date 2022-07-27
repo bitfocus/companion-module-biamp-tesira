@@ -21,7 +21,9 @@
 	},
 	"author": "Adrian Davis <themusicnerd@gmail.com>",
 	"contributors": [
-		"Joseph Adams <josephdadams@gmail.com>","David Stevens <teamjtf4@gmail.com>"
+		"Joseph Adams <josephdadams@gmail.com>",
+		"David Stevens <teamjtf4@gmail.com>",
+		"Tim Terry <timt@exit-the-plane.com>"
 	],
 	"license": "MIT",
 	"bugs": {
