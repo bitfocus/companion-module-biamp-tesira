@@ -1,0 +1,26 @@
+{
+	"id": "biamp-tesira",
+	"name": "biamp-tesira",
+	"shortname": "biamp-tesira",
+	"description": "A short one line description of your module",
+	"version": "2.0.0",
+	"license": "MIT",
+	"repository": "git+https://github.com/bitfocus/companion-module-your-module-name.git",
+	"bugs": "https://github.com/bitfocus/companion-module-your-module-name/issues",
+	"maintainers": [
+		{
+			"name": "Your name",
+			"email": "Your email"
+		}
+	],
+	"runtime": {
+		"type": "node22",
+		"api": "nodejs-ipc",
+		"apiVersion": "0.0.0",
+		"entrypoint": "../index.js"
+	},
+	"legacyIds": [],
+	"manufacturer": "Biamp",
+	"products": ["TesiraFORTE"],
+	"keywords": []
+}
