@@ -1,25 +1,5 @@
 module.exports = function (self) {
 	self.setActionDefinitions({
-		sample_action: {
-			name: 'My First Action',
-			options: [
-				{
-					id: 'num',
-					type: 'number',
-					label: 'Test',
-					default: 5,
-					min: 0,
-					max: 100,
-				},
-			],
-			callback: async (event) => {
-				console.log('Hello world!', event.options.num)
-			},
-		},
-	})
-
-
-	self.setActions({
 		setFaderLevel: {
 		  name: "Set Fader Level",
 		  options: [
@@ -51,8 +31,8 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			this.sendCommand(event.options.instanceID + " set level " + event.options.channel + " " + event.options.level);
-		  	console.log("Set fader level");
+			self.sendCommand(event.options.instanceID + " set level " + event.options.channel + " " + event.options.level);
+		  	self.log("debug", "Set fader " + event.options.channel + " to level " + event.options.level);
 		  }
 		},
 		incFaderLevel: {
@@ -93,8 +73,8 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			this.sendCommand(event.options.instanceID + " " + event.options.command + " level " + event.options.channel + " " + event.options.amount);
-		  	console.log("Inc/dec fader level");
+			self.sendCommand(event.options.instanceID + " " + event.options.command + " level " + event.options.channel + " " + event.options.amount);
+		  	self.log("Debug", "Inc/dec fader level");
 		  }
 		},
 		incFaderLevelTimer: {
@@ -142,7 +122,7 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			this.Fader_Timer(
+			self.Fader_Timer(
 				"start",
 				event.options.rate,
 				event.options.command,
@@ -151,14 +131,14 @@ module.exports = function (self) {
 				event.options.channel,
 				event.options.amount
 			  );
-		  	console.log("Start fader timer");
+		  	self.log("debug", "Start fader timer");
 		  }
 		},
 		incFaderLevelStop: {
 		  label: "Stop Increasing Fader Level",
 		  callback: async (event) => {
-			this.Fader_Timer("increase", "stop", null);
-			console.log("Stop inc/dec fader level");
+			self.Fader_Timer("increase", "stop", null);
+			self.log("debug", "Stop inc/dec fader level");
 		  }
 		},
 		faderMute: {
@@ -192,8 +172,8 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			this.sendCommand(event.options.instanceID + " set mute " + event.options.channel + " " + event.options.muteStatus);
-		  	console.log("Fader mute");
+			self.sendCommand(event.options.instanceID + " set mute " + event.options.channel + " " + event.options.muteStatus);
+		  	self.log("debug", "Fader mute");
 		  }
 		},
 		recallPreset: {
@@ -209,15 +189,15 @@ module.exports = function (self) {
 			}
 		  ],
 		  callback: async (event) => {
-			this.sendCommand("DEVICE recallPreset " + event.options.presetID);
-		  	console.log("Recall preset");
+			self.sendCommand("DEVICE recallPreset " + event.options.presetID);
+		  	self.log("info", "Recall preset");
 		  }
 		},
 		customCommand: {
 		  label: "Custom Command",
 		  options: [
 			{
-			  type: "text",
+			  type: "static-text",
 			  id: "info",
 			  width: 12,
 			  label:
@@ -225,7 +205,7 @@ module.exports = function (self) {
 			  value: "",
 			},
 			{
-			  type: "text",
+			  type: "static-text",
 			  id: "info",
 			  width: 12,
 			  label:
@@ -242,8 +222,8 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			this.sendCommand(event.options.command);
-		  	console.log("Custom command: " + event.options.command);
+			self.sendCommand(event.options.command);
+		  	self.log("info", "Custom command: " + event.options.command);
 		  }
 		},
 	});
