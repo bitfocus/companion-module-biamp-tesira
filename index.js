@@ -88,21 +88,42 @@ class TesiraInstance extends InstanceBase {
           //remove all the useless trailing zeros from number values
           var varName = tokens[1];
           var value = tokens[2];
-          if (value.indexOf('.') > 0) {
-            value = value.slice(0,value.indexOf('.'));
-          }
-    
-          if(!(varName in this.customVarNames)) {
-            this.customVarNames[varName] = "";
-            this.customVars.push({name: varName, variableId: varName});
-            this.setVariableDefinitions(this.customVars);
-          }
-    
+
           var tmpVar = {};
-          tmpVar[varName] = value;
+          //handle the possiblity of an array return value
+          //Append "_" + index to the variable name for each element
+          var tokenValueMatches = value.match(/\[(.*?)\]/);
+          if(tokenValueMatches != null) {
+            tokenValueMatches[1].split(" ").forEach(function(tokenValue, index) {
+              var tmpVarName = varName + "_" + (index+1);
+              if(!(tmpVarName in this.customVarNames)) {
+                this.customVarNames[tmpVarName] = "";
+                this.customVars.push({name: tmpVarName, variableId: tmpVarName});
+                this.setVariableDefinitions(this.customVars);
+              }
+
+              if (tokenValue.indexOf('.') > 0) {
+                tokenValue = tokenValue.slice(0,tokenValue.indexOf('.'));
+              }
+
+              tmpVar[tmpVarName] = tokenValue.trim();
+              this.log("debug", "Variable set - "+ tmpVarName + " = " + tokenValue);
+            }, this);
+          } else {    
+            if(!(varName in this.customVarNames)) {
+              this.customVarNames[varName] = "";
+              this.customVars.push({name: varName, variableId: varName});
+              this.setVariableDefinitions(this.customVars);
+            }
+      
+            if (value.indexOf('.') > 0) {
+              value = value.slice(0,value.indexOf('.'));
+            }
+            tmpVar[varName] = value;
+            this.log("debug", "Variable set - "+ varName + " = " + value);
+          }
+
           this.setVariableValues(tmpVar);
-    
-          this.log("debug", "Variable set - "+ varName + " = " + value);
         }
       });
 

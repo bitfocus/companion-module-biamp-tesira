@@ -36,7 +36,7 @@ module.exports = function (self) {
 		  }
 		},
 		incFaderLevel: {
-		  label: "Increment/Decrement Fader Level",
+		  name: "Increment/Decrement Fader Level",
 		  options: [
 			{
 			  type: "dropdown",
@@ -74,11 +74,11 @@ module.exports = function (self) {
 		  ],
 		  callback: async (event) => {
 			self.sendCommand(event.options.instanceID + " " + event.options.command + " level " + event.options.channel + " " + event.options.amount);
-		  	self.log("Debug", "Inc/dec fader level");
+		  	self.log("Debug", event.options.command + " " + event.options.instanceID + " fader " + event.options.channel + " by " + event.options.amount);
 		  }
 		},
 		incFaderLevelTimer: {
-		  label: "Increase Fader Level 1 Point Continuously",
+		  name: "Increase Fader Level 1 Point Continuously",
 		  options: [
 			{
 			  type: "number",
@@ -135,14 +135,14 @@ module.exports = function (self) {
 		  }
 		},
 		incFaderLevelStop: {
-		  label: "Stop Increasing Fader Level",
+		  name: "Stop Increasing Fader Level",
 		  callback: async (event) => {
 			self.Fader_Timer("increase", "stop", null);
 			self.log("debug", "Stop inc/dec fader level");
 		  }
 		},
 		faderMute: {
-		  label: "Fader Mute",
+		  name: "Fader Mute",
 		  options: [
 			{
 			  type: "textinput",
@@ -167,17 +167,22 @@ module.exports = function (self) {
 			  choices: [
 				{ id: "true", label: "Mute" },
 				{ id: "false", label: "Unmute" },
+				{ id: "toggle", label: "Toggle" }
 			  ],
 			  default: "true",
 			},
 		  ],
 		  callback: async (event) => {
-			self.sendCommand(event.options.instanceID + " set mute " + event.options.channel + " " + event.options.muteStatus);
-		  	self.log("debug", "Fader mute");
+			if(event.options.muteStatus == "toggle") {
+				self.sendCommand(event.options.instanceID + " toggle mute " + event.options.channel);
+			} else {
+				self.sendCommand(event.options.instanceID + " set mute " + event.options.channel + " " + event.options.muteStatus);
+			}
+		  	self.log("debug", event.options.instanceID + " fader " + event.options.channel + " mute " + event.options.muteStatus);
 		  }
 		},
 		recallPreset: {
-		  label: "Recall Preset",
+		  name: "Recall Preset",
 		  options: [
 			{
 			  type: "textinput",
@@ -190,11 +195,11 @@ module.exports = function (self) {
 		  ],
 		  callback: async (event) => {
 			self.sendCommand("DEVICE recallPreset " + event.options.presetID);
-		  	self.log("info", "Recall preset");
+		  	self.log("info", "Recall preset " + event.options.presetID);
 		  }
 		},
 		customCommand: {
-		  label: "Custom Command",
+		  name: "Custom Command",
 		  options: [
 			{
 			  type: "static-text",
