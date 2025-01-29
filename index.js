@@ -11,8 +11,10 @@ class TesiraInstance extends InstanceBase {
   async init(config) {
 		this.config = config;
     this.TIMER_FADER = null;
+    this.TIMER_POLLING = null;
     this.customVarNames = [];
     this.customVars = [];
+    this.pollingCmds = [];
 
     this.log("debug", "Init");
 
@@ -20,6 +22,7 @@ class TesiraInstance extends InstanceBase {
 
     this.initPresets();
     this.initTCP();
+    this.initPollingTCP();
 
 		this.updateActions(); // export actions
 		this.updateFeedbacks(); // export feedbacks
@@ -36,13 +39,28 @@ class TesiraInstance extends InstanceBase {
       clearInterval(this.TIMER_FADER);
       this.TIMER_FADER = null;
     }
-  
+
+    if (this.TIMER_POLLING !== null) {
+      clearInterval(this.TIMER_POLLING);
+      this.TIMER_POLLING = null;
+    }
+    
 		this.log("debug", "Destroy");
 	}
 
 	async configUpdated(config) {
 		this.config = config;
-	}
+
+    if (this.TIMER_POLLING !== null) {
+      clearInterval(this.TIMER_POLLING);
+      this.TIMER_POLLING = null;
+    }
+
+    this.TIMER_POLLING = setInterval(
+      this.doPolling.bind(this),
+      this.config.pollinginterval
+    );    
+  }
 
 
 	initTCP() {
@@ -82,12 +100,11 @@ class TesiraInstance extends InstanceBase {
     
         //capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
         //regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
-        if (line.match(/! \"publishToken\":\"\w*\" \"value\":.*/)) {
-          var tokens = line.match(/! \"publishToken\":\"(\w*)\" \"value\":(.*)/);
-          
+        const matchTokens = line.matchAll(/! \"publishToken\":\"(\w*)\" \"value\":(.*)/g);
+        for(const token of matchTokens) {
           //remove all the useless trailing zeros from number values
-          var varName = tokens[1];
-          var value = tokens[2];
+          var varName = token[1];
+          var value = token[2];
 
           var tmpVar = {};
           //handle the possiblity of an array return value
@@ -143,6 +160,135 @@ class TesiraInstance extends InstanceBase {
       this.log("info", "Please specify host in config.");
     }
 	}
+
+  //Create a separate connection to manage the timed polling queries so the received data doesn't overlap with the subscription updates
+  initPollingTCP() {
+		const maxBufferLength = 2048 
+		let receivebuffer = []
+
+    if (this.poll_socket !== undefined) {
+			this.poll_socket.destroy();
+			delete this.poll_socket;
+		}
+
+		if (this.config.host) {
+      this.log("debug", "Polling connection to " + this.config.host + " port 23");
+			this.poll_socket = new TelnetHelper(this.config.host, 23);
+
+      this.poll_socket.on("status_change", (status, message) => {
+        this.log("debug", status + " -- " + message);
+      });
+
+      this.poll_socket.on("error", (err) => {
+        this.log("error", "Network error: " + err.message);
+      });
+
+      this.poll_socket.on("connect", () => {
+        this.log("debug", "Polling socket connected");
+
+        if (this.TIMER_POLLING !== null) {
+          clearInterval(this.TIMER_POLLING);
+          this.TIMER_POLLING = null;
+        }
+    
+        this.TIMER_POLLING = setInterval(
+          this.doPolling.bind(this),
+          this.config.pollinginterval
+        );    
+      });
+
+      this.poll_socket.on("data", (buffer) => {
+        const line = buffer.toString("utf-8");
+
+        this.log("debug", "Polling data: " + line);
+    
+        //capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
+        //regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
+        if (this.pollVar !== undefined && this.pollVar.name != "" && line.match(/\+OK \"value\":.*/)) {
+          var tokens = line.match(/\+OK \"value\":(.*)/);
+
+          var value = tokens[1];
+          var tmpVar = {};
+
+          //handle the possiblity of an array return value
+          //Append "_" + index to the variable name for each element
+          var tokenValueMatches = value.match(/\[(.*?)\]/);
+          if(tokenValueMatches != null) {
+            tokenValueMatches[1].split(" ").forEach(function(tokenValue, index) {
+              var tmpVarName = this.pollVar.name + "_" + (index+1);
+              if(!(tmpVarName in this.customVarNames)) {
+                this.customVarNames[tmpVarName] = "";
+                this.customVars.push({name: tmpVarName, variableId: tmpVarName});
+                this.setVariableDefinitions(this.customVars);
+              }
+
+              if (tokenValue.indexOf('.') > 0) {
+                tokenValue = tokenValue.slice(0,tokenValue.indexOf('.'));
+              }
+
+              tmpVar[tmpVarName] = tokenValue.trim();
+              this.log("debug", "Variable set - "+ tmpVarName + " = " + tokenValue);
+            }, this);
+          } else {    
+            if(!(this.pollVar.name in this.customVarNames)) {
+              this.customVarNames[this.pollVar.name] = "";
+              this.customVars.push({name: this.pollVar.name, variableId: this.pollVar.name});
+              this.setVariableDefinitions(this.customVars);
+            }
+      
+            if (value.indexOf('.') > 0) {
+              value = value.slice(0,value.indexOf('.'));
+            }
+            tmpVar[this.pollVar.name] = value;
+            this.log("debug", "Variable set - "+ this.pollVar.name + " = " + value);
+          }
+
+          this.setVariableValues(tmpVar);
+          this.pollVar.name = "";
+          this.pollVar.resolver();
+        }
+      });
+
+      this.poll_socket.on("iac", (type, info) => {
+        this.log("debug", "Telnet- IAC");
+        // tell remote we WONT do anything we're asked to DO
+        if (type == 'DO') {
+          this.poll_socket.send(Buffer.from([ 255, 252, info ]));
+        }
+  
+        // tell the remote DONT do whatever they WILL offer
+        if (type == 'WILL') {
+          this.poll_socket.send(Buffer.from([ 255, 254, info ]));
+        }
+      });  
+    } else {
+      this.log("info", "Please specify host in config.");
+    }
+	}
+
+  async doPolling() {
+    for(let i=0; i < this.pollingCmds.length; i++) {
+      let pollCmd = this.pollingCmds[i];
+      this.pollVar = {name: pollCmd.varName, resolver: null};
+      await new Promise((resolve, reject) => {
+        this.pollVar.resolver = resolve;
+
+        if (pollCmd.cmd !== undefined) {
+          if (this.poll_socket !== undefined && this.poll_socket.isConnected) {
+            this.poll_socket.send(pollCmd.cmd + "\r\n");
+            this.log("debug", "Sent polling command: " + pollCmd.cmd);
+          } else {
+            this.log("error", "Socket not connected :(");
+          }
+        } else {
+          this.log("error", "Invalid polling command: " + pollCmd.cmd);
+        }
+      }); 
+      if('runOnce' in pollCmd) {
+        this.pollingCmds.splice(i, 1);
+      }
+    };
+  }
 
   sendCommand(cmd) {
     if (cmd !== undefined) {
@@ -344,6 +490,14 @@ class TesiraInstance extends InstanceBase {
         width: 6,
         default: "192.168.0.1",
         regex: Regex.IP,
+      },
+      {
+        type: "textinput",
+        id: "pollinginterval",
+        label: "Polling interval in ms (for GET requests)",
+        width: 6,
+        default: "500",
+        regex: Regex.NUMBER,
       }
     ];
   }

@@ -31,7 +31,9 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			self.sendCommand(event.options.instanceID + " set level " + event.options.channel + " " + event.options.level);
+			var rawCmd = event.options.instanceID + " set level " + event.options.channel + " " + event.options.level;
+			const cmd = await self.parseVariablesInString(rawCmd);
+			self.sendCommand(cmd);
 		  	self.log("debug", "Set fader " + event.options.channel + " to level " + event.options.level);
 		  }
 		},
@@ -73,7 +75,9 @@ module.exports = function (self) {
 			},
 		  ],
 		  callback: async (event) => {
-			self.sendCommand(event.options.instanceID + " " + event.options.command + " level " + event.options.channel + " " + event.options.amount);
+			var rawCmd = event.options.instanceID + " " + event.options.command + " level " + event.options.channel + " " + event.options.amount;
+			const cmd = await self.parseVariablesInString(rawCmd);
+			self.sendCommand(cmd);
 		  	self.log("Debug", event.options.command + " " + event.options.instanceID + " fader " + event.options.channel + " by " + event.options.amount);
 		  }
 		},
@@ -224,12 +228,145 @@ module.exports = function (self) {
 			  tooltip: "Insert Command Here",
 			  default: "1",
 			  width: 6,
+			  useVariables: true
 			},
 		  ],
 		  callback: async (event) => {
-			self.sendCommand(event.options.command);
+			const cmd = await self.parseVariablesInString(event.options.command);
+			self.sendCommand(cmd);
 		  	self.log("info", "Custom command: " + event.options.command);
 		  }
 		},
-	});
+		customPolling: {
+			name: "Polling Parameter",
+			options: [
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "BiAmp has created a command calculator to create custom command strings for the Tesira controllers. Unless you know what you are doing, it is strongly recommended that you use the calculator to create your command.",
+				value: "",
+			  },
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "The calculator can be found here: https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator",
+				value: "",
+			  },
+			  {
+				type: "textinput",
+				id: "command",
+				label: "Command",
+				tooltip: "Insert 'GET' Command Here",
+				default: "1",
+				width: 15,
+				useVariables: true
+			  },
+			  {
+				type: "textinput",
+				id: "customvar",
+				label: "Custom Variable",
+				tooltip: "Custom variable name to store result of 'GET' command",
+				default: "MyCustomVar",
+				width: 15,
+			  },
+			],
+			callback: async (event) => {
+			  const cmd = await self.parseVariablesInString(event.options.command);
+			  self.pollingCmds.push({varName: event.options.customvar, cmd: cmd});
+			  self.log("info", "Custom polling command (" + event.options.customvar + "): " + event.options.command);
+			}
+		  },
+		  removeCustomPolling: {
+			name: "Cancel Polling Parameter",
+			options: [
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "BiAmp has created a command calculator to create custom command strings for the Tesira controllers. Unless you know what you are doing, it is strongly recommended that you use the calculator to create your command.",
+				value: "",
+			  },
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "The calculator can be found here: https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator",
+				value: "",
+			  },
+			  {
+				type: "textinput",
+				id: "customvar",
+				label: "Custom Variable",
+				tooltip: "Custom variable name to cancel polling",
+				default: "MyCustomVar",
+				width: 15,
+			  },
+			],
+			callback: async (event) => {
+			  let customVarIdx = self.pollingCmds.findIndex((obj) => obj.varName === event.options.customvar);
+			  if(customVarIdx > -1) {
+				self.pollingCmds.splice(customVarIdx, 1);
+			  }
+			  self.log("info", "Cancel custom polling (" + event.options.customvar + ")");
+			}
+		  },
+		  pollOnce: {
+			name: "Get parameter value",
+			options: [
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "BiAmp has created a command calculator to create custom command strings for the Tesira controllers. Unless you know what you are doing, it is strongly recommended that you use the calculator to create your command.",
+				value: "",
+			  },
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "The calculator can be found here: https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator",
+				value: "",
+			  },
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+				  "This action will check a parameter value once and store it in the specified custom variable name.",
+				value: "",
+			  },
+			  {
+				type: "textinput",
+				id: "command",
+				label: "Command",
+				tooltip: "Insert 'GET' Command Here",
+				default: "1",
+				width: 15,
+				useVariables: true
+			  },
+			  {
+				type: "textinput",
+				id: "customvar",
+				label: "Custom Variable",
+				tooltip: "Custom variable name to store result of 'GET' command",
+				default: "MyCustomVar",
+				width: 15,
+			  },
+			],
+			callback: async (event) => {
+			  const cmd = await self.parseVariablesInString(event.options.command);
+			  self.pollingCmds.push({varName: event.options.customvar, cmd: cmd, runOnce: true});
+			  self.log("info", "Poll once command (" + event.options.customvar + "): " + event.options.command);
+			}
+		  },
+	   }
+	);
 }
