@@ -230,9 +230,32 @@ module.exports = function (self) {
 			  width: 6,
 			  useVariables: true
 			},
+			{
+			  type: "checkbox",
+			  id: "roundval",
+			  label: "If a numeric value is returned, round to nearest whole number",
+			  default: true
+		  },
 		  ],
 		  callback: async (event) => {
 			const cmd = await self.parseVariablesInString(event.options.command);
+
+			//Check for subscribe command so we can grab the variable name
+			var cmdTokens = cmd.split(" ");
+			if(cmdTokens[1].toLowerCase() == "subscribe") {
+				//Add the custom variable to the subscribeVars array
+				var varName = cmdTokens.reverse()[1];
+				self.subscribeVars.push({name: varName, roundVal: event.options.roundval});
+			} else if(cmdTokens[1].toLowerCase() == "unsubscribe") {
+				//Remove the custom variable from the subscribeVars array
+				var varName = cmdTokens.reverse()[0];
+				let varIdx = self.subscribeVars.findIndex((obj) => obj.name === varName);
+				if(varIdx > -1) {
+				  self.subscribeVars.splice(varIdx, 1);
+				}
+			}
+
+			//Now send the command
 			self.sendCommand(cmd);
 		  	self.log("info", "Custom command: " + event.options.command);
 		  }
@@ -240,6 +263,14 @@ module.exports = function (self) {
 		customPolling: {
 			name: "Polling Parameter",
 			options: [
+			  {
+				type: "static-text",
+				id: "info",
+				width: 12,
+				label:
+					"This action will start polling using the specified command at a frequency set in the connection instance settings.",
+				value: "",
+			  },
 			  {
 				type: "static-text",
 				id: "info",
@@ -273,10 +304,16 @@ module.exports = function (self) {
 				default: "MyCustomVar",
 				width: 15,
 			  },
+			  {
+				type: "checkbox",
+				id: "roundval",
+				label: "Round numeric values to nearest whole number",
+				default: true
+			  }
 			],
 			callback: async (event) => {
 			  const cmd = await self.parseVariablesInString(event.options.command);
-			  self.pollingCmds.push({varName: event.options.customvar, cmd: cmd});
+			  self.pollingCmds.push({varName: event.options.customvar, roundVal: event.options.roundval, cmd: cmd});
 			  self.log("info", "Custom polling command (" + event.options.customvar + "): " + event.options.command);
 			}
 		  },
@@ -288,15 +325,7 @@ module.exports = function (self) {
 				id: "info",
 				width: 12,
 				label:
-				  "BiAmp has created a command calculator to create custom command strings for the Tesira controllers. Unless you know what you are doing, it is strongly recommended that you use the calculator to create your command.",
-				value: "",
-			  },
-			  {
-				type: "static-text",
-				id: "info",
-				width: 12,
-				label:
-				  "The calculator can be found here: https://support.biamp.com/Tesira/Control/Tesira_command_string_calculator",
+				  "This will cancel recurring polling of the specified variable.",
 				value: "",
 			  },
 			  {
@@ -359,11 +388,17 @@ module.exports = function (self) {
 				tooltip: "Custom variable name to store result of 'GET' command",
 				default: "MyCustomVar",
 				width: 15,
-			  },
+			},
+			{
+			  type: "checkbox",
+			  id: "roundval",
+			  label: "Round numeric values to nearest whole number",
+			  default: true
+			},
 			],
 			callback: async (event) => {
 			  const cmd = await self.parseVariablesInString(event.options.command);
-			  self.pollingCmds.push({varName: event.options.customvar, cmd: cmd, runOnce: true});
+			  self.pollingCmds.push({varName: event.options.customvar, roundVal: event.options.roundval, cmd: cmd, runOnce: true});
 			  self.log("info", "Poll once command (" + event.options.customvar + "): " + event.options.command);
 			}
 		  },

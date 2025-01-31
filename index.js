@@ -15,6 +15,8 @@ class TesiraInstance extends InstanceBase {
     this.customVarNames = [];
     this.customVars = [];
     this.pollingCmds = [];
+    this.pollVar = undefined;
+    this.subscribeVars = [];
 
     this.log("debug", "Init");
 
@@ -111,31 +113,54 @@ class TesiraInstance extends InstanceBase {
           //Append "_" + index to the variable name for each element
           var tokenValueMatches = value.match(/\[(.*?)\]/);
           if(tokenValueMatches != null) {
-            tokenValueMatches[1].split(" ").forEach(function(tokenValue, index) {
-              var tmpVarName = varName + "_" + (index+1);
+            //Split the string into an array by space delimiter, ignore spaces within quotes
+            const regex = /"[^"\\]*(?:\\.[^"\\]*)*"|[^\s"']+/g;
+            const result = tokenValueMatches[1].match(regex);
+            for(var resultToken in result) {
+              //Remove quotes and replace escaped quotes
+              var tokenValue = result[resultToken].replace(/(?<!\\)"/g, "").replace(/\\"/g, '"');
+
+              //Add custom variable if needed
+              var tmpVarName = varName + "_" + (parseInt(resultToken)+1);
               if(!(tmpVarName in this.customVarNames)) {
                 this.customVarNames[tmpVarName] = "";
                 this.customVars.push({name: tmpVarName, variableId: tmpVarName});
                 this.setVariableDefinitions(this.customVars);
               }
 
-              if (tokenValue.indexOf('.') > 0) {
-                tokenValue = tokenValue.slice(0,tokenValue.indexOf('.'));
+              //Check if this is a value that should be rounded to whole number
+              let varIdx = this.subscribeVars.findIndex((obj) => obj.name === varName);
+              if(varIdx > -1 && this.subscribeVars[varIdx].roundVal && !isNaN(tokenValue)) {
+                const numberValue = parseFloat(tokenValue);
+                tokenValue = Math.round(numberValue).toString();
               }
 
-              tmpVar[tmpVarName] = tokenValue.trim();
+              //Remove trailing zeroes
+              tokenValue = tokenValue.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1');
+              tmpVar[tmpVarName] = tokenValue;
               this.log("debug", "Variable set - "+ tmpVarName + " = " + tokenValue);
-            }, this);
+            }
           } else {    
+            //Not an array, process single return value
+            //Remove quotes and replace escaped quotes
+            value = value.replace(/(?<!\\)"/g, "").replace(/\\"/g, '"');
+
+            //Add custom variable if needed
             if(!(varName in this.customVarNames)) {
               this.customVarNames[varName] = "";
               this.customVars.push({name: varName, variableId: varName});
               this.setVariableDefinitions(this.customVars);
             }
       
-            if (value.indexOf('.') > 0) {
-              value = value.slice(0,value.indexOf('.'));
+            //Check if this is a value that should be rounded to whole number
+            let varIdx = this.subscribeVars.findIndex((obj) => obj.name === varName);
+            if(varIdx > -1 && this.subscribeVars[varIdx].roundVal && !isNaN(value)) {
+              const numberValue = parseFloat(value);
+              value = Math.round(numberValue).toString();
             }
+
+            //Remove trailing zeroes
+            value = value.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1');
             tmpVar[varName] = value;
             this.log("debug", "Variable set - "+ varName + " = " + value);
           }
@@ -204,8 +229,8 @@ class TesiraInstance extends InstanceBase {
     
         //capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
         //regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
-        if (this.pollVar !== undefined && this.pollVar.name != "" && line.match(/\+OK \"value\":.*/)) {
-          var tokens = line.match(/\+OK \"value\":(.*)/);
+        if (this.pollVar !== undefined && this.pollVar.name != "" && line.match(/\+OK (\"value\"|\"list\"):.*/)) {
+          var tokens = line.match(/\+OK (?:\"value\"|\"list\"):(.*)/);
 
           var value = tokens[1];
           var tmpVar = {};
@@ -214,31 +239,51 @@ class TesiraInstance extends InstanceBase {
           //Append "_" + index to the variable name for each element
           var tokenValueMatches = value.match(/\[(.*?)\]/);
           if(tokenValueMatches != null) {
-            tokenValueMatches[1].split(" ").forEach(function(tokenValue, index) {
-              var tmpVarName = this.pollVar.name + "_" + (index+1);
+            //Split the string into an array by space delimiter, ignore spaces within quotes
+            const regex = /"[^"\\]*(?:\\.[^"\\]*)*"|[^\s"']+/g;
+            const result = tokenValueMatches[1].match(regex);
+            for(var token in result) {
+              //Remove quotes and replace escaped quotes
+              var tokenValue = result[token].replace(/(?<!\\)"/g, "").replace(/\\"/g, '"');
+
+              //Add custom variable if needed
+              var tmpVarName = this.pollVar.name + "_" + (parseInt(token)+1);
               if(!(tmpVarName in this.customVarNames)) {
                 this.customVarNames[tmpVarName] = "";
                 this.customVars.push({name: tmpVarName, variableId: tmpVarName});
                 this.setVariableDefinitions(this.customVars);
               }
 
-              if (tokenValue.indexOf('.') > 0) {
-                tokenValue = tokenValue.slice(0,tokenValue.indexOf('.'));
+              //Check if this is a value that should be rounded to whole number
+              if(this.pollVar.roundVal && !isNaN(tokenValue)) {
+                const numberValue = parseFloat(tokenValue);
+                tokenValue = Math.round(numberValue).toString();
               }
 
-              tmpVar[tmpVarName] = tokenValue.trim();
+              //Remove trailing zeroes
+              tokenValue = tokenValue.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1');
+              tmpVar[tmpVarName] = tokenValue;
               this.log("debug", "Variable set - "+ tmpVarName + " = " + tokenValue);
-            }, this);
+            }
           } else {    
+            //Remove quotes and replace escaped quotes
+            value = value.replace(/(?<!\\)"/g, "").replace(/\\"/g, '"');
+
+            //Add custom variable if needed
             if(!(this.pollVar.name in this.customVarNames)) {
               this.customVarNames[this.pollVar.name] = "";
               this.customVars.push({name: this.pollVar.name, variableId: this.pollVar.name});
               this.setVariableDefinitions(this.customVars);
             }
       
-            if (value.indexOf('.') > 0) {
-              value = value.slice(0,value.indexOf('.'));
+            //Check if this is a value that should be rounded to whole number
+            if(this.pollVar.roundVal && !isNaN(value)) {
+              const numberValue = parseFloat(tokenValue);
+              value = Math.round(numberValue).toString();
             }
+
+            //Remove trailing zeroes
+            value = value.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1');
             tmpVar[this.pollVar.name] = value;
             this.log("debug", "Variable set - "+ this.pollVar.name + " = " + value);
           }
@@ -269,7 +314,7 @@ class TesiraInstance extends InstanceBase {
   async doPolling() {
     for(let i=0; i < this.pollingCmds.length; i++) {
       let pollCmd = this.pollingCmds[i];
-      this.pollVar = {name: pollCmd.varName, resolver: null};
+      this.pollVar = {name: pollCmd.varName, roundVal: pollCmd.roundVal, resolver: null};
       await new Promise((resolve, reject) => {
         this.pollVar.resolver = resolve;
 
@@ -284,6 +329,7 @@ class TesiraInstance extends InstanceBase {
           this.log("error", "Invalid polling command: " + pollCmd.cmd);
         }
       }); 
+      this.pollVar = undefined;
       if('runOnce' in pollCmd) {
         this.pollingCmds.splice(i, 1);
       }
@@ -302,12 +348,6 @@ class TesiraInstance extends InstanceBase {
       this.log("error", "Invalid command: " + cmd);
     }
   }
-
-  //instance.prototype.addVariable = function (testvar) { // this causes a crash!
-  //  var self = this;
-  //  test = self.getVariable(testvar);
-  //  console.log("checking new variable -->" + test);
-  //TO DO:  find a way to manage the custom variables that we're setting up based on return values from tesira.  add definitions so that they show up to the user
 
   initPresets() {
     const presets = {};
