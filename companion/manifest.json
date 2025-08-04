@@ -1,0 +1,26 @@
+{
+	"id": "biamp-tesira",
+	"name": "biamp-tesira",
+	"shortname": "biamp-tesira",
+	"description": "This is for Biamp TesiraFORTE devices",
+	"version": "2.0.0",
+	"license": "MIT",
+	"repository": "git+https://github.com/bkpeterson/companion-module-biamp-tesira.git",
+	"bugs": "https://github.com/bkpeterson/companion-module-biamp-tesira/issues",
+	"maintainers": [
+		{
+			"name": "Bjorn Peterson",
+			"email": "bjkarl@yahoo.com"
+		}
+	],
+	"runtime": {
+		"type": "node18",
+		"api": "nodejs-ipc",
+		"apiVersion": "0.0.0",
+		"entrypoint": "../index.js"
+	},
+	"legacyIds": [],
+	"manufacturer": "Biamp",
+	"products": ["TesiraFORTE"],
+	"keywords": []
+}
