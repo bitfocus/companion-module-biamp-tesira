@@ -10,14 +10,11 @@
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-biamp-tesira.git"
 	},
-	"author": "Adrian Davis <themusicnerd@gmail.com>",
-	"contributors": [
-		"Joseph Adams <josephdadams@gmail.com>",
-		"David Stevens <teamjtf4@gmail.com>",
-		"Tim Terry <timt@exit-the-plane.com>",
-		"Bjorn Peterson <bjkarl@yahoo.com>"
-	],
 	"license": "MIT",
+	"engines": {
+		"node": "^22.20",
+		"yarn": "^4"
+	},
 	"dependencies": {
 		"@companion-module/base": "~1.11.3"
 	},
@@ -26,6 +23,5 @@
 		"prettier": "^3.8.1"
 	},
 	"prettier": "@companion-module/tools/.prettierrc.json",
-	"packageManager": "yarn@4.12.0",
-	"homepage": "https://github.com/bitfocus/companion-module-biamp-tesira#readme"
+	"packageManager": "yarn@4.12.0"
 }
