@@ -2,19 +2,35 @@
 	"id": "biamp-tesira",
 	"name": "biamp-tesira",
 	"shortname": "biamp-tesira",
-	"description": "This is for Biamp TesiraFORTE devices",
-	"version": "2.0.0",
+	"description": "Control Biamp TesiraFORTE devices",
+	"version": "0.0.0",
 	"license": "MIT",
-	"repository": "git+https://github.com/bkpeterson/companion-module-biamp-tesira.git",
-	"bugs": "https://github.com/bkpeterson/companion-module-biamp-tesira/issues",
+	"repository": "git+https://github.com/bitfocus/companion-module-biamp-tesira.git",
+	"bugs": "https://github.com/bitfocus/companion-module-biamp-tesira/issues",
 	"maintainers": [
+		{
+			"name": "Adrian Davis",
+			"email": "themusicnerd@gmail.com"
+		},
+		{
+			"name": "Joseph Adams",
+			"email": "josephdadams@gmail.com"
+		},
+		{
+			"name": "David Stevens",
+			"email": "teamjtf4@gmail.com"
+		},
+		{
+			"name": "Tim Terry",
+			"email": "timt@exit-the-plane.com"
+		},
 		{
 			"name": "Bjorn Peterson",
 			"email": "bjkarl@yahoo.com"
 		}
 	],
 	"runtime": {
-		"type": "node18",
+		"type": "node22",
 		"api": "nodejs-ipc",
 		"apiVersion": "0.0.0",
 		"entrypoint": "../index.js"
@@ -22,5 +38,5 @@
 	"legacyIds": [],
 	"manufacturer": "Biamp",
 	"products": ["TesiraFORTE"],
-	"keywords": []
+	"keywords": ["audio", "tesira", "dsp"]
 }

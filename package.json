@@ -1,30 +1,27 @@
 {
 	"name": "biamp-tesira",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"main": "index.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"format": "prettier -w .",
+		"package": "companion-module-build"
 	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-biamp-tesira.git"
 	},
-	"author": "Adrian Davis <themusicnerd@gmail.com>",
-	"contributors": [
-		"Joseph Adams <josephdadams@gmail.com>",
-		"David Stevens <teamjtf4@gmail.com>",
-		"Tim Terry <timt@exit-the-plane.com>",
-		"Bjorn Peterson <bjkarl@yahoo.com>"
-	],
 	"license": "MIT",
+	"engines": {
+		"node": "^22.20",
+		"yarn": "^4"
+	},
 	"dependencies": {
-		"@companion-module/base": "~1.11.2"
+		"@companion-module/base": "~1.11.3"
 	},
 	"devDependencies": {
-		"@companion-module/tools": "^2.6.1",
-		"prettier": "^3.4.2"
+		"@companion-module/tools": "^2.7.1",
+		"prettier": "^3.8.1"
 	},
 	"prettier": "@companion-module/tools/.prettierrc.json",
-	"packageManager": "yarn@4.5.3",
-	"homepage": "https://github.com/bitfocus/companion-module-biamp-tesira#readme"
+	"packageManager": "yarn@4.12.0"
 }
