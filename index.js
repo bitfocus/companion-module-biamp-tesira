@@ -18,7 +18,7 @@ class TesiraInstance extends InstanceBase {
 		this.pollVar = undefined
 		this.subscribeVars = []
 
-		this.log('debug', 'Init')
+		this.debugLog('Init')
 
 		this.updateStatus(InstanceStatus.Connecting)
 
@@ -47,7 +47,7 @@ class TesiraInstance extends InstanceBase {
 			this.TIMER_POLLING = null
 		}
 
-		this.log('debug', 'Destroy')
+		this.debugLog('Destroy')
 	}
 
 	async configUpdated(config) {
@@ -63,7 +63,7 @@ class TesiraInstance extends InstanceBase {
 
 	initTCP() {
 		const maxBufferLength = 2048
-		let receivebuffer = []
+		let receivebuffer = ''
 
 		if (this.socket !== undefined) {
 			this.socket.destroy()
@@ -71,11 +71,11 @@ class TesiraInstance extends InstanceBase {
 		}
 
 		if (this.config.host) {
-			this.log('debug', 'Connection to ' + this.config.host + ' port 23')
+			this.debugLog('Connection to ' + this.config.host + ' port 23')
 			this.socket = new TelnetHelper(this.config.host, 23)
 
 			this.socket.on('status_change', (status, message) => {
-				this.log('debug', status + ' -- ' + message)
+				this.debugLog(status + ' -- ' + message)
 			})
 
 			this.socket.on('error', (err) => {
@@ -83,13 +83,18 @@ class TesiraInstance extends InstanceBase {
 			})
 
 			this.socket.on('connect', () => {
-				this.log('debug', 'Socket Connected')
+				this.debugLog('Socket Connected')
 			})
 
 			this.socket.on('data', (buffer) => {
-				const line = buffer.toString('utf-8')
+				receivebuffer += buffer.toString('utf-8')
+				const lines = receivebuffer.split('\n')
+				receivebuffer = lines.pop()
 
-				this.log('debug', 'Data: ' + line)
+				for (const line of lines) {
+				if (!line.trim()) continue
+
+				this.debugLog('Data: ' + line)
 
 				// Match part of the response from unit when a connection is made.
 				if (line.match(/Welcome to the Tesira Text Protocol Server/)) {
@@ -134,7 +139,7 @@ class TesiraInstance extends InstanceBase {
 							//Remove trailing zeroes
 							tokenValue = tokenValue.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1')
 							tmpVar[tmpVarName] = tokenValue
-							this.log('debug', 'Variable set - ' + tmpVarName + ' = ' + tokenValue)
+							this.debugLog('Variable set - ' + tmpVarName + ' = ' + tokenValue)
 						}
 					} else {
 						//Not an array, process single return value
@@ -158,15 +163,16 @@ class TesiraInstance extends InstanceBase {
 						//Remove trailing zeroes
 						value = value.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1')
 						tmpVar[varName] = value
-						this.log('debug', 'Variable set - ' + varName + ' = ' + value)
+						this.debugLog('Variable set - ' + varName + ' = ' + value)
 					}
 
 					this.setVariableValues(tmpVar)
 				}
+				} // end for loop over lines
 			})
 
 			this.socket.on('iac', (type, info) => {
-				this.log('debug', 'Telnet- IAC')
+				this.debugLog('Telnet- IAC')
 				// tell remote we WONT do anything we're asked to DO
 				if (type == 'DO') {
 					this.socket.send(Buffer.from([255, 252, info]))
@@ -185,7 +191,7 @@ class TesiraInstance extends InstanceBase {
 	//Create a separate connection to manage the timed polling queries so the received data doesn't overlap with the subscription updates
 	initPollingTCP() {
 		const maxBufferLength = 2048
-		let receivebuffer = []
+		let receivebuffer = ''
 
 		if (this.poll_socket !== undefined) {
 			this.poll_socket.destroy()
@@ -193,11 +199,11 @@ class TesiraInstance extends InstanceBase {
 		}
 
 		if (this.config.host) {
-			this.log('debug', 'Polling connection to ' + this.config.host + ' port 23')
+			this.debugLog('Polling connection to ' + this.config.host + ' port 23')
 			this.poll_socket = new TelnetHelper(this.config.host, 23)
 
 			this.poll_socket.on('status_change', (status, message) => {
-				this.log('debug', status + ' -- ' + message)
+				this.debugLog(status + ' -- ' + message)
 			})
 
 			this.poll_socket.on('error', (err) => {
@@ -205,7 +211,7 @@ class TesiraInstance extends InstanceBase {
 			})
 
 			this.poll_socket.on('connect', () => {
-				this.log('debug', 'Polling socket connected')
+				this.debugLog('Polling socket connected')
 
 				if (this.TIMER_POLLING !== null) {
 					clearInterval(this.TIMER_POLLING)
@@ -216,9 +222,14 @@ class TesiraInstance extends InstanceBase {
 			})
 
 			this.poll_socket.on('data', (buffer) => {
-				const line = buffer.toString('utf-8')
+				receivebuffer += buffer.toString('utf-8')
+				const lines = receivebuffer.split('\n')
+				receivebuffer = lines.pop()
 
-				this.log('debug', 'Polling data: ' + line)
+				for (const line of lines) {
+				if (!line.trim()) continue
+
+				this.debugLog('Polling data: ' + line)
 
 				//capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
 				//regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
@@ -256,7 +267,7 @@ class TesiraInstance extends InstanceBase {
 							//Remove trailing zeroes
 							tokenValue = tokenValue.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1')
 							tmpVar[tmpVarName] = tokenValue
-							this.log('debug', 'Variable set - ' + tmpVarName + ' = ' + tokenValue)
+							this.debugLog('Variable set - ' + tmpVarName + ' = ' + tokenValue)
 						}
 					} else {
 						//Remove quotes and replace escaped quotes
@@ -278,17 +289,18 @@ class TesiraInstance extends InstanceBase {
 						//Remove trailing zeroes
 						value = value.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1')
 						tmpVar[this.pollVar.name] = value
-						this.log('debug', 'Variable set - ' + this.pollVar.name + ' = ' + value)
+						this.debugLog('Variable set - ' + this.pollVar.name + ' = ' + value)
 					}
 
 					this.setVariableValues(tmpVar)
 					this.pollVar.name = ''
 					this.pollVar.resolver()
 				}
+				} // end for loop over lines
 			})
 
 			this.poll_socket.on('iac', (type, info) => {
-				this.log('debug', 'Telnet- IAC')
+				this.debugLog('Telnet- IAC')
 				// tell remote we WONT do anything we're asked to DO
 				if (type == 'DO') {
 					this.poll_socket.send(Buffer.from([255, 252, info]))
@@ -314,7 +326,7 @@ class TesiraInstance extends InstanceBase {
 				if (pollCmd.cmd !== undefined) {
 					if (this.poll_socket !== undefined && this.poll_socket.isConnected) {
 						this.poll_socket.send(pollCmd.cmd + '\r\n')
-						this.log('debug', 'Sent polling command: ' + pollCmd.cmd)
+						this.debugLog('Sent polling command: ' + pollCmd.cmd)
 					} else {
 						this.log('error', 'Socket not connected :(')
 					}
@@ -333,7 +345,7 @@ class TesiraInstance extends InstanceBase {
 		if (cmd !== undefined) {
 			if (this.socket !== undefined && this.socket.isConnected) {
 				this.socket.send(cmd + '\r\n')
-				this.log('debug', 'Sent Command: ' + cmd)
+				this.debugLog('Sent Command: ' + cmd)
 			} else {
 				this.log('error', 'Socket not connected :(')
 			}
@@ -532,7 +544,18 @@ class TesiraInstance extends InstanceBase {
 				default: '500',
 				regex: Regex.NUMBER,
 			},
+			{
+				type: 'checkbox',
+				id: 'debugLog',
+				label: 'Enable debug logging',
+				width: 6,
+				default: false,
+			},
 		]
+	}
+
+	debugLog(msg) {
+		if (this.config.debugLog) this.log('debug', msg)
 	}
 
 	updateActions() {
