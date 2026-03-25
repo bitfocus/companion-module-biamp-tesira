@@ -15,7 +15,9 @@ class TesiraInstance extends InstanceBase {
 		this.customVarNames = []
 		this.customVars = []
 		this.pollingCmds = []
-		this.pollVar = undefined
+		this.pollQueue = []
+		this.pollingInProgress = false
+		this.POLL_TIMEOUT_MS = 5000
 		this.subscribeVars = []
 
 		this.debugLog('Init')
@@ -36,6 +38,10 @@ class TesiraInstance extends InstanceBase {
 			this.socket.destroy()
 		}
 
+		if (this.poll_socket !== undefined) {
+			this.poll_socket.destroy()
+		}
+
 		//destroy timers
 		if (this.TIMER_FADER !== null) {
 			clearInterval(this.TIMER_FADER)
@@ -46,6 +52,13 @@ class TesiraInstance extends InstanceBase {
 			clearInterval(this.TIMER_POLLING)
 			this.TIMER_POLLING = null
 		}
+
+		// Resolve any pending poll promises
+		for (const entry of this.pollQueue) {
+			entry.resolver()
+		}
+		this.pollQueue = []
+		this.pollingInProgress = false
 
 		this.debugLog('Destroy')
 	}
@@ -233,7 +246,8 @@ class TesiraInstance extends InstanceBase {
 
 				//capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
 				//regEx to capture label and value:  /! \"publishToken\":\"(\w*)\" \"value\":(.*)/gm
-				if (this.pollVar !== undefined && this.pollVar.name != '' && line.match(/\+OK (\"value\"|\"list\"):.*/)) {
+				if (this.pollQueue.length > 0 && line.match(/\+OK (\"value\"|\"list\"):.*/)) {
+					const currentPoll = this.pollQueue.shift()
 					var tokens = line.match(/\+OK (?:\"value\"|\"list\"):(.*)/)
 
 					var value = tokens[1]
@@ -251,7 +265,7 @@ class TesiraInstance extends InstanceBase {
 							var tokenValue = result[token].replace(/(?<!\\)"/g, '').replace(/\\"/g, '"')
 
 							//Add custom variable if needed
-							var tmpVarName = this.pollVar.name + '_' + (parseInt(token) + 1)
+							var tmpVarName = currentPoll.name + '_' + (parseInt(token) + 1)
 							if (!(tmpVarName in this.customVarNames)) {
 								this.customVarNames[tmpVarName] = ''
 								this.customVars.push({ name: tmpVarName, variableId: tmpVarName })
@@ -259,7 +273,7 @@ class TesiraInstance extends InstanceBase {
 							}
 
 							//Check if this is a value that should be rounded to whole number
-							if (this.pollVar.roundVal && !isNaN(tokenValue)) {
+							if (currentPoll.roundVal && !isNaN(tokenValue)) {
 								const numberValue = parseFloat(tokenValue)
 								tokenValue = Math.round(numberValue).toString()
 							}
@@ -274,27 +288,33 @@ class TesiraInstance extends InstanceBase {
 						value = value.replace(/(?<!\\)"/g, '').replace(/\\"/g, '"')
 
 						//Add custom variable if needed
-						if (!(this.pollVar.name in this.customVarNames)) {
-							this.customVarNames[this.pollVar.name] = ''
-							this.customVars.push({ name: this.pollVar.name, variableId: this.pollVar.name })
+						if (!(currentPoll.name in this.customVarNames)) {
+							this.customVarNames[currentPoll.name] = ''
+							this.customVars.push({ name: currentPoll.name, variableId: currentPoll.name })
 							this.setVariableDefinitions(this.customVars)
 						}
 
 						//Check if this is a value that should be rounded to whole number
-						if (this.pollVar.roundVal && !isNaN(value)) {
-							const numberValue = parseFloat(tokenValue)
+						if (currentPoll.roundVal && !isNaN(value)) {
+							const numberValue = parseFloat(value)
 							value = Math.round(numberValue).toString()
 						}
 
 						//Remove trailing zeroes
 						value = value.replace(/(\.\d*?[1-9])0+|\.0*$/, '$1')
-						tmpVar[this.pollVar.name] = value
-						this.debugLog('Variable set - ' + this.pollVar.name + ' = ' + value)
+						tmpVar[currentPoll.name] = value
+						this.debugLog('Variable set - ' + currentPoll.name + ' = ' + value)
 					}
 
 					this.setVariableValues(tmpVar)
-					this.pollVar.name = ''
-					this.pollVar.resolver()
+					currentPoll.resolver()
+				}
+
+				// Handle error responses so polling doesn't hang
+				if (this.pollQueue.length > 0 && line.match(/^-ERR/)) {
+					const currentPoll = this.pollQueue.shift()
+					this.debugLog('Polling error response for ' + currentPoll.name + ': ' + line)
+					currentPoll.resolver()
 				}
 				} // end for loop over lines
 			})
@@ -317,34 +337,65 @@ class TesiraInstance extends InstanceBase {
 	}
 
 	async doPolling() {
-		for (let i = 0; i < this.pollingCmds.length; i++) {
-			let pollCmd = this.pollingCmds[i]
-			this.pollVar = { name: pollCmd.varName, roundVal: pollCmd.roundVal, resolver: null }
-			await new Promise((resolve, reject) => {
-				this.pollVar.resolver = resolve
+		if (this.pollingInProgress) {
+			this.debugLog('Polling cycle still in progress, skipping')
+			return
+		}
+		this.pollingInProgress = true
 
-				if (pollCmd.cmd !== undefined) {
-					if (this.poll_socket !== undefined && this.poll_socket.isConnected) {
-						this.poll_socket.send(pollCmd.cmd + '\r\n')
-						this.debugLog('Sent polling command: ' + pollCmd.cmd)
-					} else {
-						this.log('error', 'Socket not connected :(')
-					}
-				} else {
+		try {
+			for (let i = 0; i < this.pollingCmds.length; i++) {
+				let pollCmd = this.pollingCmds[i]
+
+				if (pollCmd.cmd === undefined) {
 					this.log('error', 'Invalid polling command: ' + pollCmd.cmd)
+					continue
 				}
-			})
-			this.pollVar = undefined
-			if ('runOnce' in pollCmd) {
-				this.pollingCmds.splice(i, 1)
+
+				if (this.poll_socket === undefined || !this.poll_socket.isConnected) {
+					this.log('error', 'Socket not connected :(')
+					break
+				}
+
+				const result = await Promise.race([
+					new Promise((resolve) => {
+						this.pollQueue.push({
+							name: pollCmd.varName,
+							roundVal: pollCmd.roundVal,
+							resolver: resolve,
+						})
+						this.poll_socket.send(pollCmd.cmd + '\n')
+						this.debugLog('Sent polling command: ' + pollCmd.cmd)
+					}),
+					new Promise((resolve) => {
+						setTimeout(() => resolve('TIMEOUT'), this.POLL_TIMEOUT_MS)
+					}),
+				])
+
+				if (result === 'TIMEOUT') {
+					this.debugLog('Polling command timed out: ' + pollCmd.cmd)
+					const idx = this.pollQueue.findIndex((e) => e.name === pollCmd.varName)
+					if (idx > -1) {
+						this.pollQueue.splice(idx, 1)
+					}
+				}
+
+				if ('runOnce' in pollCmd) {
+					this.pollingCmds.splice(i, 1)
+					i--
+				}
 			}
+		} catch (err) {
+			this.log('error', 'Polling error: ' + err.message)
+		} finally {
+			this.pollingInProgress = false
 		}
 	}
 
 	sendCommand(cmd) {
 		if (cmd !== undefined) {
 			if (this.socket !== undefined && this.socket.isConnected) {
-				this.socket.send(cmd + '\r\n')
+				this.socket.send(cmd + '\n')
 				this.debugLog('Sent Command: ' + cmd)
 			} else {
 				this.log('error', 'Socket not connected :(')
