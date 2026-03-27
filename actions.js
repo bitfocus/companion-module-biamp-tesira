@@ -261,15 +261,35 @@ module.exports = function (self) {
 			callback: async (event) => {
 				const cmd = await self.parseVariablesInString(event.options.command)
 
-				//Check for subscribe command so we can grab the variable name
+				//Check for subscribe/unsubscribe command
 				var cmdTokens = cmd.split(' ')
 				if (cmdTokens[1].toLowerCase() == 'subscribe') {
-					//Add the custom variable to the subscribeVars array
 					var varName = cmdTokens.reverse()[1]
-					self.subscribeVars.push({ name: varName, roundVal: event.options.roundval })
+					var unsubCmd = cmd.replace(/\bsubscribe\b/, 'unsubscribe')
+
+					// Track for rounding (upsert)
+					var existingVarIdx = self.subscribeVars.findIndex((obj) => obj.name === varName)
+					if (existingVarIdx > -1) {
+						self.subscribeVars[existingVarIdx] = { name: varName, roundVal: event.options.roundval }
+					} else {
+						self.subscribeVars.push({ name: varName, roundVal: event.options.roundval })
+					}
+
+					// Track for reconnect (upsert)
+					var existingSubIdx = self.subscriptions.findIndex((obj) => obj.varName === varName)
+					if (existingSubIdx > -1) {
+						self.subscriptions[existingSubIdx] = { varName, cmd, unsubCmd }
+					} else {
+						self.subscriptions.push({ varName, cmd, unsubCmd })
+					}
 				} else if (cmdTokens[1].toLowerCase() == 'unsubscribe') {
-					//Remove the custom variable from the subscribeVars array
 					var varName = cmdTokens.reverse()[0]
+
+					let subIdx = self.subscriptions.findIndex((obj) => obj.varName === varName)
+					if (subIdx > -1) {
+						self.subscriptions.splice(subIdx, 1)
+					}
+
 					let varIdx = self.subscribeVars.findIndex((obj) => obj.name === varName)
 					if (varIdx > -1) {
 						self.subscribeVars.splice(varIdx, 1)
