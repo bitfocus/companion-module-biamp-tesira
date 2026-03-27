@@ -426,5 +426,182 @@ module.exports = function (self) {
 				self.log('info', 'Poll once command (' + event.options.customvar + '): ' + event.options.command)
 			},
 		},
+		subscribeParameter: {
+			name: 'Subscribe to Parameter',
+			options: [
+				{
+					type: 'static-text',
+					id: 'info',
+					width: 12,
+					label:
+						'Subscribe to a parameter so the Tesira pushes updates automatically when the value changes. Much more responsive than polling.',
+					value: '',
+				},
+				{
+					type: 'textinput',
+					id: 'instanceID',
+					label: 'Instance Tag',
+					tooltip: 'Instance Tag of the block (e.g. MyMatrix)',
+					default: 'Level1',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'attribute',
+					label: 'Attribute',
+					tooltip: 'Attribute name - case sensitive (e.g. level, mute, crosspointLevelState)',
+					default: 'level',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'index',
+					label: 'Index',
+					tooltip: 'Index value (e.g. channel number)',
+					default: '1',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'customvar',
+					label: 'Variable Name',
+					tooltip: 'Custom variable name to store the value (also used as publishToken)',
+					default: 'MyVar',
+					width: 6,
+				},
+				{
+					type: 'textinput',
+					id: 'rate',
+					label: 'Rate (ms)',
+					tooltip: 'Minimum update interval in milliseconds',
+					default: '500',
+					width: 6,
+				},
+				{
+					type: 'checkbox',
+					id: 'roundval',
+					label: 'Round numeric values to nearest whole number',
+					default: true,
+				},
+				{
+					type: 'checkbox',
+					id: 'getInitial',
+					label: 'Get initial value on subscribe',
+					default: true,
+				},
+			],
+			callback: async (event) => {
+				const instanceID = (await self.parseVariablesInString(event.options.instanceID)).trim()
+				const attribute = (await self.parseVariablesInString(event.options.attribute)).trim()
+				const index = (await self.parseVariablesInString(event.options.index)).trim()
+				const varName = event.options.customvar.trim()
+				const rate = event.options.rate.trim()
+
+				if (!varName) {
+					self.log('error', 'Subscribe: Variable Name cannot be empty')
+					return
+				}
+
+				const cmd = instanceID + ' subscribe ' + attribute + ' ' + index + ' "' + varName + '" ' + rate
+				const unsubCmd = instanceID + ' unsubscribe ' + attribute + ' ' + index + ' "' + varName + '"'
+
+				// Update or add tracking for rounding (prevent duplicates)
+				const existingVarIdx = self.subscribeVars.findIndex((obj) => obj.name === varName)
+				if (existingVarIdx > -1) {
+					self.subscribeVars[existingVarIdx] = { name: varName, roundVal: event.options.roundval }
+				} else {
+					self.subscribeVars.push({ name: varName, roundVal: event.options.roundval })
+				}
+
+				// Update or add tracking for reconnect (prevent duplicates)
+				const existingSubIdx = self.subscriptions.findIndex((obj) => obj.varName === varName)
+				if (existingSubIdx > -1) {
+					self.subscriptions[existingSubIdx] = { varName, cmd, unsubCmd }
+				} else {
+					self.subscriptions.push({ varName, cmd, unsubCmd })
+				}
+
+				self.sendCommand(cmd)
+				self.log('info', 'Subscribed to ' + varName + ': ' + cmd)
+
+				// Get initial value via poll queue
+				if (event.options.getInitial) {
+					const getCmd = instanceID + ' get ' + attribute + ' ' + index
+					self.pollingCmds.push({
+						varName: varName,
+						roundVal: event.options.roundval,
+						cmd: getCmd,
+						runOnce: true,
+					})
+					self.debugLog('Queued initial GET: ' + getCmd)
+				}
+			},
+		},
+		unsubscribeParameter: {
+			name: 'Unsubscribe from Parameter',
+			options: [
+				{
+					type: 'textinput',
+					id: 'instanceID',
+					label: 'Instance Tag',
+					tooltip: 'Instance Tag of the block',
+					default: 'Level1',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'attribute',
+					label: 'Attribute',
+					tooltip: 'Attribute name',
+					default: 'level',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'index',
+					label: 'Index',
+					tooltip: 'Index value',
+					default: '1',
+					width: 6,
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					id: 'customvar',
+					label: 'Variable Name',
+					tooltip: 'The variable name / publishToken used when subscribing',
+					default: 'MyVar',
+					width: 6,
+				},
+			],
+			callback: async (event) => {
+				const varName = event.options.customvar.trim()
+
+				// Use stored unsubCmd to ensure it exactly matches what was subscribed
+				let subIdx = self.subscriptions.findIndex((obj) => obj.varName === varName)
+				if (subIdx > -1) {
+					self.sendCommand(self.subscriptions[subIdx].unsubCmd)
+					self.subscriptions.splice(subIdx, 1)
+				} else {
+					// Fallback: reconstruct command if not tracked (e.g. subscribed via customCommand)
+					const instanceID = (await self.parseVariablesInString(event.options.instanceID)).trim()
+					const attribute = (await self.parseVariablesInString(event.options.attribute)).trim()
+					const index = (await self.parseVariablesInString(event.options.index)).trim()
+					self.sendCommand(instanceID + ' unsubscribe ' + attribute + ' ' + index + ' "' + varName + '"')
+				}
+
+				let varIdx = self.subscribeVars.findIndex((obj) => obj.name === varName)
+				if (varIdx > -1) {
+					self.subscribeVars.splice(varIdx, 1)
+				}
+
+				self.log('info', 'Unsubscribed from ' + varName)
+			},
+		},
 	})
 }

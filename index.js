@@ -20,6 +20,7 @@ class TesiraInstance extends InstanceBase {
 		this.pollingInProgress = false
 		this.POLL_TIMEOUT_MS = 5000
 		this.subscribeVars = []
+		this.subscriptions = []
 
 		this.debugLog('Init')
 
@@ -35,6 +36,13 @@ class TesiraInstance extends InstanceBase {
 
 	// When module gets deleted
 	async destroy() {
+		// Unsubscribe all active subscriptions before disconnecting
+		for (const sub of this.subscriptions) {
+			this.sendCommand(sub.unsubCmd)
+		}
+		this.subscriptions = []
+		this.subscribeVars = []
+
 		if (this.socket !== undefined) {
 			this.socket.destroy()
 		}
@@ -54,13 +62,12 @@ class TesiraInstance extends InstanceBase {
 			this.TIMER_POLLING = null
 		}
 
-		// Resolve any pending drain promise
+		// Clear queue first so doPolling doesn't log a spurious timeout warning
+		this.pollQueue = []
 		if (this.pollDrainResolver) {
 			this.pollDrainResolver()
 			this.pollDrainResolver = null
 		}
-		this.pollQueue = []
-		this.pollingInProgress = false
 
 		this.debugLog('Destroy')
 	}
@@ -114,6 +121,12 @@ class TesiraInstance extends InstanceBase {
 				// Match part of the response from unit when a connection is made.
 				if (line.match(/Welcome to the Tesira Text Protocol Server/)) {
 					this.updateStatus(InstanceStatus.Ok)
+
+					// Re-subscribe after Welcome banner — device is ready to accept commands
+					for (const sub of this.subscriptions) {
+						this.sendCommand(sub.cmd)
+						this.debugLog('Re-subscribed: ' + sub.cmd)
+					}
 				}
 
 				//capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
@@ -317,7 +330,7 @@ class TesiraInstance extends InstanceBase {
 				}
 
 				// Handle error responses so polling doesn't hang
-				if (this.pollQueue.length > 0 && line.match(/^-ERR/)) {
+				else if (this.pollQueue.length > 0 && line.match(/^-ERR/)) {
 					const currentPoll = this.pollQueue.shift()
 					this.log('error', 'Polling error response for ' + currentPoll.name + ': ' + line)
 
@@ -377,14 +390,16 @@ class TesiraInstance extends InstanceBase {
 
 			// Wait for all responses to come back or timeout
 			if (this.pollQueue.length > 0) {
+				let timeoutId
 				await Promise.race([
 					new Promise((resolve) => {
 						this.pollDrainResolver = resolve
 					}),
 					new Promise((resolve) => {
-						setTimeout(resolve, this.POLL_TIMEOUT_MS)
+						timeoutId = setTimeout(resolve, this.POLL_TIMEOUT_MS)
 					}),
 				])
+				clearTimeout(timeoutId)
 				this.pollDrainResolver = null
 
 				// Clear any remaining entries on timeout
