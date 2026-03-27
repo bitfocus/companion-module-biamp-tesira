@@ -16,9 +16,11 @@ class TesiraInstance extends InstanceBase {
 		this.customVars = []
 		this.pollingCmds = []
 		this.pollQueue = []
+		this.pollDrainResolver = null
 		this.pollingInProgress = false
 		this.POLL_TIMEOUT_MS = 5000
 		this.subscribeVars = []
+		this.subscriptions = []
 
 		this.debugLog('Init')
 
@@ -34,6 +36,13 @@ class TesiraInstance extends InstanceBase {
 
 	// When module gets deleted
 	async destroy() {
+		// Unsubscribe all active subscriptions before disconnecting
+		for (const sub of this.subscriptions) {
+			this.sendCommand(sub.unsubCmd)
+		}
+		this.subscriptions = []
+		this.subscribeVars = []
+
 		if (this.socket !== undefined) {
 			this.socket.destroy()
 		}
@@ -53,25 +62,21 @@ class TesiraInstance extends InstanceBase {
 			this.TIMER_POLLING = null
 		}
 
-		// Resolve any pending poll promises
-		for (const entry of this.pollQueue) {
-			entry.resolver()
-		}
+		// Clear queue first so doPolling doesn't log a spurious timeout warning
 		this.pollQueue = []
-		this.pollingInProgress = false
+		if (this.pollDrainResolver) {
+			this.pollDrainResolver()
+			this.pollDrainResolver = null
+		}
 
 		this.debugLog('Destroy')
 	}
 
 	async configUpdated(config) {
 		this.config = config
-
-		if (this.TIMER_POLLING !== null) {
-			clearInterval(this.TIMER_POLLING)
-			this.TIMER_POLLING = null
-		}
-
-		this.TIMER_POLLING = setInterval(this.doPolling.bind(this), this.config.pollinginterval)
+		this.updateStatus(InstanceStatus.Connecting)
+		this.initTCP()
+		this.initPollingTCP()
 	}
 
 	initTCP() {
@@ -112,6 +117,12 @@ class TesiraInstance extends InstanceBase {
 				// Match part of the response from unit when a connection is made.
 				if (line.match(/Welcome to the Tesira Text Protocol Server/)) {
 					this.updateStatus(InstanceStatus.Ok)
+
+					// Re-subscribe after Welcome banner — device is ready to accept commands
+					for (const sub of this.subscriptions) {
+						this.sendCommand(sub.cmd)
+						this.debugLog('Re-subscribed: ' + sub.cmd)
+					}
 				}
 
 				//capture subscription responses into custom variables (example:! "publishToken":"MyLevelCustomLabel" "value":-100.0000)
@@ -307,14 +318,21 @@ class TesiraInstance extends InstanceBase {
 					}
 
 					this.setVariableValues(tmpVar)
-					currentPoll.resolver()
+
+					// Check if all responses received
+					if (this.pollQueue.length === 0 && this.pollDrainResolver) {
+						this.pollDrainResolver()
+					}
 				}
 
 				// Handle error responses so polling doesn't hang
-				if (this.pollQueue.length > 0 && line.match(/^-ERR/)) {
+				else if (this.pollQueue.length > 0 && line.match(/^-ERR/)) {
 					const currentPoll = this.pollQueue.shift()
-					this.debugLog('Polling error response for ' + currentPoll.name + ': ' + line)
-					currentPoll.resolver()
+					this.log('error', 'Polling error response for ' + currentPoll.name + ': ' + line)
+
+					if (this.pollQueue.length === 0 && this.pollDrainResolver) {
+						this.pollDrainResolver()
+					}
 				}
 				} // end for loop over lines
 			})
@@ -344,6 +362,12 @@ class TesiraInstance extends InstanceBase {
 		this.pollingInProgress = true
 
 		try {
+			if (this.poll_socket === undefined || !this.poll_socket.isConnected) {
+				this.log('error', 'Socket not connected :(')
+				return
+			}
+
+			// Send all commands at once
 			for (let i = 0; i < this.pollingCmds.length; i++) {
 				let pollCmd = this.pollingCmds[i]
 
@@ -352,37 +376,39 @@ class TesiraInstance extends InstanceBase {
 					continue
 				}
 
-				if (this.poll_socket === undefined || !this.poll_socket.isConnected) {
-					this.log('error', 'Socket not connected :(')
-					break
-				}
+				this.pollQueue.push({
+					name: pollCmd.varName,
+					roundVal: pollCmd.roundVal,
+				})
+				this.poll_socket.send(pollCmd.cmd + '\n')
+				this.debugLog('Sent polling command: ' + pollCmd.cmd)
+			}
 
-				const result = await Promise.race([
+			// Wait for all responses to come back or timeout
+			if (this.pollQueue.length > 0) {
+				let timeoutId
+				await Promise.race([
 					new Promise((resolve) => {
-						this.pollQueue.push({
-							name: pollCmd.varName,
-							roundVal: pollCmd.roundVal,
-							resolver: resolve,
-						})
-						this.poll_socket.send(pollCmd.cmd + '\n')
-						this.debugLog('Sent polling command: ' + pollCmd.cmd)
+						this.pollDrainResolver = resolve
 					}),
 					new Promise((resolve) => {
-						setTimeout(() => resolve('TIMEOUT'), this.POLL_TIMEOUT_MS)
+						timeoutId = setTimeout(resolve, this.POLL_TIMEOUT_MS)
 					}),
 				])
+				clearTimeout(timeoutId)
+				this.pollDrainResolver = null
 
-				if (result === 'TIMEOUT') {
-					this.debugLog('Polling command timed out: ' + pollCmd.cmd)
-					const idx = this.pollQueue.findIndex((e) => e.name === pollCmd.varName)
-					if (idx > -1) {
-						this.pollQueue.splice(idx, 1)
-					}
+				// Clear any remaining entries on timeout
+				if (this.pollQueue.length > 0) {
+					this.log('warn', 'Polling timed out with ' + this.pollQueue.length + ' responses remaining')
+					this.pollQueue = []
 				}
+			}
 
-				if ('runOnce' in pollCmd) {
+			// Remove runOnce commands (reverse order to preserve indices)
+			for (let i = this.pollingCmds.length - 1; i >= 0; i--) {
+				if ('runOnce' in this.pollingCmds[i]) {
 					this.pollingCmds.splice(i, 1)
-					i--
 				}
 			}
 		} catch (err) {
