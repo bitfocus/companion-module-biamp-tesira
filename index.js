@@ -74,13 +74,9 @@ class TesiraInstance extends InstanceBase {
 
 	async configUpdated(config) {
 		this.config = config
-
-		if (this.TIMER_POLLING !== null) {
-			clearInterval(this.TIMER_POLLING)
-			this.TIMER_POLLING = null
-		}
-
-		this.TIMER_POLLING = setInterval(this.doPolling.bind(this), this.config.pollinginterval)
+		this.updateStatus(InstanceStatus.Connecting)
+		this.initTCP()
+		this.initPollingTCP()
 	}
 
 	initTCP() {
