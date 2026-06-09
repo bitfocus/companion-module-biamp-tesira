@@ -13,6 +13,38 @@ function buildCommandParts(...parts: Array<string | undefined>): string {
 		.trim()
 }
 
+const optionTooltips: Record<string, string> = {
+	presetId: 'Numeric Tesira preset ID to recall. Variables are supported.',
+	instanceTag: 'Tesira block instance tag or alias, for example Level1 or Room_Output.',
+	channel: 'Tesira channel or index argument, usually 1 for mono level and mute blocks.',
+	level: 'Level in dB, or the adjustment amount for increment/decrement commands.',
+	amount: 'Increment or decrement amount in dB.',
+	input: 'Tesira input index argument.',
+	output: 'Tesira output index argument.',
+	source: 'Source selection number or index.',
+	attribute: 'Tesira Text Protocol attribute name, such as level, mute, or crosspointLevel.',
+	customAttribute: 'Custom Tesira Text Protocol attribute used when the selected template is Custom.',
+	index1: 'First optional Tesira index argument.',
+	index2: 'Second optional Tesira index argument. Leave blank when the command does not need it.',
+	value: 'Value sent for set commands. Leave blank for get or toggle commands.',
+	command: 'Tesira Text Protocol command or command mode for this action.',
+	variableName: 'Companion variable name or Tesira publishToken used to store the result.',
+	rate: 'Minimum subscription update interval in milliseconds.',
+	intervalMs: 'Repeat interval in milliseconds for held level adjustments.',
+}
+
+function applyOptionTooltips(actions: CompanionActionDefinitions): void {
+	for (const action of Object.values(actions)) {
+		if (!action) continue
+		for (const option of action.options ?? []) {
+			const mutableOption = option as { id?: string; tooltip?: string }
+			if (mutableOption.id && !mutableOption.tooltip && optionTooltips[mutableOption.id]) {
+				mutableOption.tooltip = optionTooltips[mutableOption.id]
+			}
+		}
+	}
+}
+
 export function UpdateActions(self: ModuleInstance): void {
 	const actions: CompanionActionDefinitions = {
 		recall_preset: {
@@ -663,5 +695,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 	}
 
+	applyOptionTooltips(actions)
 	self.setActionDefinitions(actions)
 }

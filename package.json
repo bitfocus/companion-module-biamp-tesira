@@ -1,6 +1,6 @@
 {
 	"name": "companion-module-biamp-tesira",
-	"version": "3.0.2",
+	"version": "3.0.3",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {

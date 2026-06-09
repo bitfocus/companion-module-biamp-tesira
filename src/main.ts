@@ -142,6 +142,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	private pollQueue: PendingPoll[] = []
 	private pollDrainResolver: (() => void) | undefined
 	private pollingInProgress = false
+	private pollingRerunRequested = false
 	private readonly pollTimeoutMs = 5000
 
 	private trackedSubscriptions = new Map<string, TrackedSubscription>()
@@ -628,6 +629,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		this.pollSocket.on('error', (error: Error) => {
 			this.lastError = error.message
+			this.log('warn', `Tesira polling socket error: ${error.message}`)
+			this.updateStatus(InstanceStatus.ConnectionFailure, `Polling socket: ${error.message}`)
 			this.updateVariables()
 		})
 
@@ -972,10 +975,15 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	private async doPolling(): Promise<void> {
-		if (this.pollingInProgress || !this.pollSocket?.isConnected) return
+		if (this.pollingInProgress) {
+			this.pollingRerunRequested = true
+			return
+		}
+		if (!this.pollSocket?.isConnected) return
 		if (this.trackedPolling.size === 0) return
 
 		this.pollingInProgress = true
+		const sentRunOnceIds = new Set<string>()
 		try {
 			for (const [variableId, pollCommand] of Array.from(this.trackedPolling.entries())) {
 				this.pollQueue.push({
@@ -984,6 +992,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 					roundNumericValues: pollCommand.roundNumericValues,
 					rangeProbe: pollCommand.rangeProbe,
 				})
+				if (pollCommand.runOnce) sentRunOnceIds.add(variableId)
 				void this.pollSocket.send(`${pollCommand.command}\n`)
 			}
 
@@ -1000,11 +1009,16 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			this.pollDrainResolver = undefined
 			this.pollQueue = []
 
-			for (const [variableId, pollCommand] of Array.from(this.trackedPolling.entries())) {
-				if (pollCommand.runOnce) this.trackedPolling.delete(variableId)
+			for (const variableId of sentRunOnceIds) {
+				const pollCommand = this.trackedPolling.get(variableId)
+				if (pollCommand?.runOnce) this.trackedPolling.delete(variableId)
 			}
 		} finally {
 			this.pollingInProgress = false
+			if (this.pollingRerunRequested) {
+				this.pollingRerunRequested = false
+				void this.doPolling()
+			}
 		}
 	}
 }

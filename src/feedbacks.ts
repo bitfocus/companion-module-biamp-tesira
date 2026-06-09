@@ -1,4 +1,4 @@
-import { combineRgb, type CompanionFeedbackDefinitions } from '@companion-module/base'
+import { combineRgb, type CompanionFeedbackContext, type CompanionFeedbackDefinitions } from '@companion-module/base'
 import { graphics } from 'companion-module-utils'
 import type { ModuleInstance } from './main.js'
 
@@ -13,13 +13,13 @@ function parseResolvedNumber(value: string): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined
 }
 
-async function resolveNumber(self: ModuleInstance, source: unknown): Promise<number | undefined> {
-	const resolved = await self.parseVariablesInString(typeof source === 'string' ? source : '')
+async function resolveNumber(context: CompanionFeedbackContext, source: unknown): Promise<number | undefined> {
+	const resolved = await context.parseVariablesInString(typeof source === 'string' ? source : '')
 	return parseResolvedNumber(resolved.trim())
 }
 
-async function resolveText(self: ModuleInstance, source: unknown): Promise<string> {
-	return (await self.parseVariablesInString(typeof source === 'string' ? source : '')).trim()
+async function resolveText(context: CompanionFeedbackContext, source: unknown): Promise<string> {
+	return (await context.parseVariablesInString(typeof source === 'string' ? source : '')).trim()
 }
 
 function resolveImageSize(image: { width: number; height: number } | undefined): { width: number; height: number } {
@@ -65,6 +65,27 @@ function readRangeFromVariables(
 	return { min, max }
 }
 
+function parseRangeOverrides(raw: string): Map<string, { min: number; max: number }> {
+	const ranges = new Map<string, { min: number; max: number }>()
+	for (const entry of raw.split(/[\n;]/)) {
+		const trimmed = entry.trim()
+		if (!trimmed) continue
+		const [aliasPart, rangePart] = trimmed.split('=')
+		if (!aliasPart || !rangePart) continue
+		const [minPart, maxPart] = rangePart.split(':')
+		const min = Number(minPart)
+		const max = Number(maxPart)
+		if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) continue
+		ranges.set(aliasPart.trim(), { min, max })
+	}
+	return ranges
+}
+
+function readRangeOverride(self: ModuleInstance, alias: string | undefined): { min: number; max: number } | undefined {
+	if (!alias) return undefined
+	return parseRangeOverrides(self.config.levelRangeOverrides ?? '').get(alias)
+}
+
 function inferAliasFromSource(
 	self: ModuleInstance,
 	explicitInstanceTag: unknown,
@@ -91,7 +112,10 @@ function resolveLevelRange(
 	const alias = inferAliasFromSource(self, explicitInstanceTag, source, 'level_1')
 	return (
 		(alias
-			? (self.getLiveLevelRange(alias) ?? self.getLiveAliasRange(alias) ?? readRangeFromVariables(self, alias))
+			? (self.getLiveLevelRange(alias) ??
+				self.getLiveAliasRange(alias) ??
+				readRangeFromVariables(self, alias) ??
+				readRangeOverride(self, alias))
 			: undefined) ?? {
 			min: Number(minValue ?? -100),
 			max: Number(maxValue ?? 12),
@@ -109,7 +133,10 @@ function resolveMeterRange(
 	const alias = inferAliasFromSource(self, explicitInstanceTag, source, 'meter_1')
 	return (
 		(alias
-			? (self.getLiveMeterRange(alias) ?? self.getLiveAliasRange(alias) ?? readRangeFromVariables(self, alias))
+			? (self.getLiveMeterRange(alias) ??
+				self.getLiveAliasRange(alias) ??
+				readRangeFromVariables(self, alias) ??
+				readRangeOverride(self, alias))
 			: undefined) ?? {
 			min: Number(minValue ?? -90),
 			max: Number(maxValue ?? 20),
@@ -134,7 +161,8 @@ function resolveGenericRange(
 			? (self.getLiveAliasRange(alias) ??
 				self.getLiveLevelRange(alias) ??
 				self.getLiveMeterRange(alias) ??
-				readRangeFromVariables(self, alias))
+				readRangeFromVariables(self, alias) ??
+				readRangeOverride(self, alias))
 			: undefined) ?? {
 			min: Number(minValue ?? -90),
 			max: Number(maxValue ?? 20),
@@ -390,8 +418,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 1000,
 				},
 			],
-			callback: async (feedback) => {
-				const actual = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const actual = await resolveNumber(context, feedback.options.source)
 				if (actual === undefined) return false
 				const expected = Number(feedback.options.expected ?? 0)
 				switch (String(feedback.options.comparator ?? 'gt')) {
@@ -451,9 +479,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: true,
 				},
 			],
-			callback: async (feedback) => {
-				let source = await self.parseVariablesInString(String(feedback.options.source ?? ''))
-				let expected = await self.parseVariablesInString(String(feedback.options.expected ?? ''))
+			callback: async (feedback, context) => {
+				let source = await context.parseVariablesInString(String(feedback.options.source ?? ''))
+				let expected = await context.parseVariablesInString(String(feedback.options.expected ?? ''))
 				if (feedback.options.ignoreCase) {
 					source = source.toLowerCase()
 					expected = expected.toLowerCase()
@@ -495,8 +523,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					],
 				},
 			],
-			callback: async (feedback) => {
-				const source = (await self.parseVariablesInString(String(feedback.options.source ?? ''))).trim().toLowerCase()
+			callback: async (feedback, context) => {
+				const source = (await context.parseVariablesInString(String(feedback.options.source ?? '')))
+					.trim()
+					.toLowerCase()
 				return source === String(feedback.options.mutedWhen ?? 'true').toLowerCase()
 			},
 		},
@@ -530,10 +560,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: true,
 				},
 			],
-			callback: async (feedback) => {
+			callback: async (feedback, context) => {
 				const ignoreCase = Boolean(feedback.options.ignoreCase)
-				const source = await resolveText(self, feedback.options.source)
-				const activeValues = (await resolveText(self, feedback.options.activeValues))
+				const source = await resolveText(context, feedback.options.source)
+				const activeValues = (await resolveText(context, feedback.options.activeValues))
 					.split(',')
 					.map((value) => value.trim())
 					.filter(Boolean)
@@ -587,8 +617,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: true,
 				},
 			],
-			callback: async (feedback) => {
-				const actual = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const actual = await resolveNumber(context, feedback.options.source)
 				if (actual === undefined) return false
 
 				const min = Number(feedback.options.min ?? 0)
@@ -647,8 +677,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
-				const value = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const value = await resolveNumber(context, feedback.options.source)
 				const range = resolveMeterRange(
 					self,
 					feedback.options.instanceTag,
@@ -717,8 +747,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const value = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const value = await resolveNumber(context, feedback.options.source)
 				const range = resolveMeterRange(
 					self,
 					feedback.options.instanceTag,
@@ -782,8 +812,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const value = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const value = await resolveNumber(context, feedback.options.source)
 				const range = resolveMeterRange(
 					self,
 					feedback.options.instanceTag,
@@ -876,9 +906,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const vuValue = await resolveNumber(self, feedback.options.sourceVu)
-				const grValue = await resolveNumber(self, feedback.options.sourceGainReduction)
+			callback: async (feedback, context) => {
+				const vuValue = await resolveNumber(context, feedback.options.sourceVu)
+				const grValue = await resolveNumber(context, feedback.options.sourceGainReduction)
 				const meterRange = resolveMeterRange(
 					self,
 					feedback.options.meterInstanceTag,
@@ -977,9 +1007,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const vuValue = await resolveNumber(self, feedback.options.sourceVu)
-				const grValue = await resolveNumber(self, feedback.options.sourceGainReduction)
+			callback: async (feedback, context) => {
+				const vuValue = await resolveNumber(context, feedback.options.sourceVu)
+				const grValue = await resolveNumber(context, feedback.options.sourceGainReduction)
 				const meterRange = resolveMeterRange(
 					self,
 					feedback.options.meterInstanceTag,
@@ -1049,8 +1079,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const value = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const value = await resolveNumber(context, feedback.options.source)
 				const range = resolveGenericRange(
 					self,
 					feedback.options.instanceTag,
@@ -1115,8 +1145,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					max: 20,
 				},
 			],
-			callback: async (feedback) => {
-				const value = await resolveNumber(self, feedback.options.source)
+			callback: async (feedback, context) => {
+				const value = await resolveNumber(context, feedback.options.source)
 				const range = resolveLevelRange(
 					self,
 					feedback.options.instanceTag,
@@ -1216,9 +1246,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
-				const levelValue = await resolveNumber(self, feedback.options.sourceLevel)
-				const meterValue = await resolveNumber(self, feedback.options.sourceMeter)
+			callback: async (feedback, context) => {
+				const levelValue = await resolveNumber(context, feedback.options.sourceLevel)
+				const meterValue = await resolveNumber(context, feedback.options.sourceMeter)
 				const levelRange = resolveLevelRange(
 					self,
 					feedback.options.levelInstanceTag,
@@ -1329,9 +1359,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
-				const levelValue = await resolveNumber(self, feedback.options.sourceLevel)
-				const meterValue = await resolveNumber(self, feedback.options.sourceMeter)
+			callback: async (feedback, context) => {
+				const levelValue = await resolveNumber(context, feedback.options.sourceLevel)
+				const meterValue = await resolveNumber(context, feedback.options.sourceMeter)
 				const levelRange = resolveLevelRange(
 					self,
 					feedback.options.levelInstanceTag,
@@ -1471,10 +1501,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
-				const levelValue = await resolveNumber(self, feedback.options.sourceLevel)
-				const meterValue = await resolveNumber(self, feedback.options.sourceMeter)
-				const grValue = await resolveNumber(self, feedback.options.sourceGainReduction)
+			callback: async (feedback, context) => {
+				const levelValue = await resolveNumber(context, feedback.options.sourceLevel)
+				const meterValue = await resolveNumber(context, feedback.options.sourceMeter)
+				const grValue = await resolveNumber(context, feedback.options.sourceGainReduction)
 				const levelRange = resolveLevelRange(
 					self,
 					feedback.options.levelInstanceTag,
@@ -1625,10 +1655,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
-				const levelValue = await resolveNumber(self, feedback.options.sourceLevel)
-				const meterValue = await resolveNumber(self, feedback.options.sourceMeter)
-				const grValue = await resolveNumber(self, feedback.options.sourceGainReduction)
+			callback: async (feedback, context) => {
+				const levelValue = await resolveNumber(context, feedback.options.sourceLevel)
+				const meterValue = await resolveNumber(context, feedback.options.sourceMeter)
+				const grValue = await resolveNumber(context, feedback.options.sourceGainReduction)
 				const levelRange = resolveLevelRange(
 					self,
 					feedback.options.levelInstanceTag,
@@ -1852,7 +1882,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: combineRgb(40, 150, 255),
 				},
 			],
-			callback: async (feedback) => {
+			callback: async (feedback, context) => {
 				const layout = String(feedback.options.layout ?? 'level_right_vu') as UnifiedMeterLayout
 				const levelRange = resolveLevelRange(
 					self,
@@ -1883,22 +1913,22 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					feedback.options.meterMax,
 				)
 				const levelValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceLevel),
+					await resolveNumber(context, feedback.options.sourceLevel),
 					levelRange.min,
 					levelRange.max,
 				)
 				const vuValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceVu),
+					await resolveNumber(context, feedback.options.sourceVu),
 					vuRange.min,
 					vuRange.max,
 				)
 				const leftVuValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceLeftVu),
+					await resolveNumber(context, feedback.options.sourceLeftVu),
 					leftVuRange.min,
 					leftVuRange.max,
 				)
 				const rightVuValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceRightVu),
+					await resolveNumber(context, feedback.options.sourceRightVu),
 					rightVuRange.min,
 					rightVuRange.max,
 				)
@@ -1924,17 +1954,17 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					feedback.options.grMax,
 				)
 				const grValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceGainReduction),
+					await resolveNumber(context, feedback.options.sourceGainReduction),
 					grRange.min,
 					grRange.max,
 				)
 				const leftGrValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceLeftGainReduction),
+					await resolveNumber(context, feedback.options.sourceLeftGainReduction),
 					leftGrRange.min,
 					leftGrRange.max,
 				)
 				const rightGrValue = normalizedMeterValue(
-					await resolveNumber(self, feedback.options.sourceRightGainReduction),
+					await resolveNumber(context, feedback.options.sourceRightGainReduction),
 					rightGrRange.min,
 					rightGrRange.max,
 				)

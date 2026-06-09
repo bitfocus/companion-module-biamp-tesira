@@ -39,5 +39,5 @@
 	"legacyIds": [],
 	"manufacturer": "Biamp",
 	"products": ["Tesira", "Tesira Server", "Tesira Forte", "Tesira Forte X", "Tesira Volta"],
-	"keywords": ["audio", "tesira", "dsp", "metering", "subscriptions"]
+	"keywords": ["audio", "dsp", "metering", "subscriptions"]
 }
