@@ -1,5 +1,6 @@
 import { combineRgb, type CompanionPresetDefinitions } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
+import { parseRangeOverrides } from './range-overrides.js'
 
 function sanitizeVariableName(value: string): string {
 	return value
@@ -46,25 +47,6 @@ function parsePairOverrides(raw: string): Map<string, string> {
 		const control = trimmed.slice(0, separatorIndex).trim()
 		const meter = trimmed.slice(separatorIndex + 1).trim()
 		if (control && meter) map.set(control, meter)
-	}
-	return map
-}
-
-function parseRangeOverrides(raw: string): Map<string, { min: number; max: number }> {
-	const map = new Map<string, { min: number; max: number }>()
-	for (const entry of raw.split(',')) {
-		const trimmed = entry.trim()
-		if (!trimmed) continue
-		const separatorIndex = trimmed.indexOf('=')
-		if (separatorIndex < 1) continue
-		const tag = trimmed.slice(0, separatorIndex).trim()
-		const rangePart = trimmed.slice(separatorIndex + 1).trim()
-		const [minRaw, maxRaw] = rangePart.split(':')
-		const min = Number.parseFloat(minRaw ?? '')
-		const max = Number.parseFloat(maxRaw ?? '')
-		if (tag && Number.isFinite(min) && Number.isFinite(max) && min < max) {
-			map.set(tag, { min, max })
-		}
 	}
 	return map
 }

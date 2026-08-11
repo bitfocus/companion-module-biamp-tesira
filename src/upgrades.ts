@@ -81,6 +81,15 @@ function remapActionSpecificOptions(action: CompanionMigrationAction): boolean {
 			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
 			break
 		case 'subscribe_helper':
+			if (options.attribute !== undefined) {
+				options.templateId = 'custom'
+				options.customAttribute = options.attribute
+				delete options.attribute
+				changed = true
+			}
+			if (options.index1 !== undefined) changed = stringifyOption(options, 'index1') || changed
+			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
+			break
 		case 'unsubscribe_helper':
 			if (options.index1 !== undefined) changed = stringifyOption(options, 'index1') || changed
 			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
