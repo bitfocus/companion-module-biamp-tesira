@@ -12,6 +12,8 @@ import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
+import { detectLoginPrompt } from './login-prompt.js'
+import { formatConnectionStatus } from './connection-status.js'
 
 interface TrackedSubscription {
 	cmd: string
@@ -137,6 +139,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 	private socket: TelnetHelper | undefined
 	private pollSocket: TelnetHelper | undefined
+	private commandReady = false
+	private pollingReady = false
 	private pollTimer: NodeJS.Timeout | undefined
 	private levelHoldTimer: NodeJS.Timeout | undefined
 	private pollQueue: PendingPoll[] = []
@@ -310,7 +314,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	updateVariables(): void {
 		const values: Record<string, string> = {
 			connected: this.isReady ? 'true' : 'false',
-			connection_status: this.isReady ? 'Connected' : 'Disconnected',
+			connection_status: formatConnectionStatus(this.commandReady, this.pollingReady),
 			last_error: this.lastError,
 			last_command: this.lastCommand,
 			last_response: this.lastResponse,
@@ -324,6 +328,34 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		this.setVariableValues(values)
+	}
+
+	private syncConnectionStatus(status: InstanceStatus, message?: string): void {
+		const wasReady = this.isReady
+		this.isReady = this.commandReady && this.pollingReady
+
+		if (this.isReady) {
+			this.lastError = ''
+			this.updateStatus(InstanceStatus.Ok)
+		} else {
+			this.updateStatus(status, message)
+		}
+
+		this.updateVariables()
+		if (wasReady !== this.isReady) this.checkFeedbacks('connected')
+	}
+
+	private stopPollingTimer(): void {
+		if (this.pollTimer) {
+			clearInterval(this.pollTimer)
+			this.pollTimer = undefined
+		}
+	}
+
+	private startPollingTimer(): void {
+		this.stopPollingTimer()
+		this.pollTimer = setInterval(() => void this.doPolling(), Math.max(250, this.config.pollingInterval || 1000))
+		void this.doPolling()
 	}
 
 	async restartConnections(): Promise<void> {
@@ -363,10 +395,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	async closeConnections(): Promise<void> {
-		if (this.pollTimer) {
-			clearInterval(this.pollTimer)
-			this.pollTimer = undefined
-		}
+		this.stopPollingTimer()
 		if (this.levelHoldTimer) {
 			clearInterval(this.levelHoldTimer)
 			this.levelHoldTimer = undefined
@@ -385,6 +414,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			this.pollSocket = undefined
 		}
 
+		this.commandReady = false
+		this.pollingReady = false
+		this.isReady = false
+
 		this.pollQueue = []
 		if (this.pollDrainResolver) {
 			this.pollDrainResolver()
@@ -392,21 +425,23 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 	}
 
-	sendCommand(command: string): void {
-		if (!command) return
+	sendCommand(command: string): boolean {
+		if (!command) return false
 
 		this.lastCommand = command
 		this.updateVariables()
 
 		if (!this.socket?.isConnected) {
 			this.lastError = 'Command socket is not connected'
-			this.updateStatus(InstanceStatus.ConnectionFailure, this.lastError)
-			this.updateVariables()
-			return
+			this.commandReady = false
+			this.stopLevelHold()
+			this.syncConnectionStatus(InstanceStatus.ConnectionFailure, this.lastError)
+			return false
 		}
 
 		void this.socket.send(`${command}\n`)
 		this.log('debug', `Sent Tesira command: ${command}`)
+		return true
 	}
 
 	addPollingCommand(
@@ -446,12 +481,17 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	): void {
 		this.stopLevelHold()
 
-		const sendAdjustment = (): void => {
-			this.sendCommand(buildCommandParts(instanceTag, command, 'level', channel, amount))
+		const sendAdjustment = (): boolean => {
+			return this.sendCommand(buildCommandParts(instanceTag, command, 'level', channel, amount))
 		}
 
-		sendAdjustment()
-		this.levelHoldTimer = setInterval(sendAdjustment, Math.max(50, intervalMs))
+		if (!sendAdjustment()) return
+		this.levelHoldTimer = setInterval(
+			() => {
+				if (!sendAdjustment()) this.stopLevelHold()
+			},
+			Math.max(50, intervalMs),
+		)
 	}
 
 	stopLevelHold(): void {
@@ -592,13 +632,36 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		this.socket.on('status_change', (status: unknown, message: unknown) => {
 			this.log('debug', `Tesira command socket: ${String(status)} ${String(message)}`)
+			const detail = typeof message === 'string' ? message : undefined
+			if (status === InstanceStatus.Ok) {
+				this.syncConnectionStatus(InstanceStatus.Connecting, 'Waiting for command socket login')
+			} else if (status === InstanceStatus.Connecting) {
+				this.commandReady = false
+				this.stopLevelHold()
+				this.syncConnectionStatus(InstanceStatus.Connecting, detail)
+			} else if (status === InstanceStatus.Disconnected) {
+				this.commandReady = false
+				this.stopLevelHold()
+				this.syncConnectionStatus(InstanceStatus.Disconnected, detail ?? 'Command socket disconnected')
+			} else if (status === InstanceStatus.UnknownError) {
+				this.commandReady = false
+				this.stopLevelHold()
+				this.syncConnectionStatus(InstanceStatus.ConnectionFailure, detail)
+			}
 		})
 
 		this.socket.on('error', (error: Error) => {
 			this.lastError = error.message
-			this.isReady = false
-			this.updateStatus(InstanceStatus.ConnectionFailure, error.message)
-			this.updateVariables()
+			this.commandReady = false
+			this.stopLevelHold()
+			this.syncConnectionStatus(InstanceStatus.ConnectionFailure, error.message)
+		})
+
+		this.socket.on('end', () => {
+			this.lastError = 'Command socket disconnected'
+			this.commandReady = false
+			this.stopLevelHold()
+			this.syncConnectionStatus(InstanceStatus.Disconnected, this.lastError)
 		})
 
 		this.socket.on('data', (buffer: Buffer) => {
@@ -625,19 +688,57 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		this.pollSocket.on('status_change', (status: unknown, message: unknown) => {
 			this.log('debug', `Tesira polling socket: ${String(status)} ${String(message)}`)
+			const detail = typeof message === 'string' ? message : undefined
+			if (status === InstanceStatus.Ok) {
+				this.syncConnectionStatus(
+					this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.Connecting,
+					'Waiting for polling socket login',
+				)
+			} else if (status === InstanceStatus.Connecting) {
+				this.pollingReady = false
+				this.stopPollingTimer()
+				this.syncConnectionStatus(
+					this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.Connecting,
+					detail ?? 'Polling socket reconnecting',
+				)
+			} else if (status === InstanceStatus.Disconnected || status === InstanceStatus.UnknownError) {
+				this.pollingReady = false
+				this.stopPollingTimer()
+				this.syncConnectionStatus(
+					this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.ConnectionFailure,
+					detail ?? 'Polling socket disconnected',
+				)
+			}
 		})
 
 		this.pollSocket.on('error', (error: Error) => {
-			this.lastError = error.message
+			this.lastError = `Polling socket: ${error.message}`
+			this.pollingReady = false
+			this.stopPollingTimer()
 			this.log('warn', `Tesira polling socket error: ${error.message}`)
-			this.updateStatus(InstanceStatus.ConnectionFailure, `Polling socket: ${error.message}`)
-			this.updateVariables()
+			this.syncConnectionStatus(
+				this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.ConnectionFailure,
+				this.lastError,
+			)
 		})
 
 		this.pollSocket.on('connect', () => {
-			if (this.pollTimer) clearInterval(this.pollTimer)
-			this.pollTimer = setInterval(() => void this.doPolling(), Math.max(250, this.config.pollingInterval || 1000))
-			void this.doPolling()
+			this.pollingReady = false
+			this.stopPollingTimer()
+			this.syncConnectionStatus(
+				this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.Connecting,
+				'Waiting for polling socket login',
+			)
+		})
+
+		this.pollSocket.on('end', () => {
+			this.lastError = 'Polling socket disconnected'
+			this.pollingReady = false
+			this.stopPollingTimer()
+			this.syncConnectionStatus(
+				this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.Disconnected,
+				this.lastError,
+			)
 		})
 
 		this.pollSocket.on('data', (buffer: Buffer) => {
@@ -658,11 +759,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	private respondToLoginPrompt(buffer: string, socket: TelnetHelper | undefined, socketName: string): string {
-		const prompt = buffer.replace(/\r\0/g, '\n').replace(/\r/g, '\n').split('\n').pop()?.trim().toLowerCase()
-
+		const prompt = detectLoginPrompt(buffer)
 		if (!prompt || !socket?.isConnected) return buffer
 
-		if (/^(login|username|user name|user):\s*$/.test(prompt)) {
+		if (prompt === 'username') {
 			const username = this.config.loginUsername?.trim() || 'default'
 			this.lastCommand = 'login username'
 			this.log('debug', `Sent Tesira ${socketName} socket login username`)
@@ -671,7 +771,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			return ''
 		}
 
-		if (/^password:\s*$/.test(prompt)) {
+		if (prompt === 'password') {
 			const password = this.secrets.loginPassword ?? 'default'
 			this.lastCommand = 'login password'
 			this.log('debug', `Sent Tesira ${socketName} socket login password`)
@@ -688,9 +788,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		if (this.config.logResponses) this.log('debug', `Tesira response: ${line}`)
 
 		if (line.includes('Welcome to the Tesira Text Protocol Server')) {
-			this.isReady = true
-			this.lastError = ''
-			this.updateStatus(InstanceStatus.Ok)
+			this.commandReady = true
+			this.syncConnectionStatus(InstanceStatus.UnknownWarning, 'Waiting for polling socket login')
 			if (this.config.autoFetchAliases) this.sendCommand('SESSION get aliases')
 			for (const subscription of this.trackedSubscriptions.values()) {
 				this.sendCommand(subscription.cmd)
@@ -731,7 +830,12 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 	private handlePollingLine(line: string): void {
 		if (this.config.logResponses) this.log('debug', `Tesira poll response: ${line}`)
-		if (line.includes('Welcome to the Tesira Text Protocol Server')) return
+		if (line.includes('Welcome to the Tesira Text Protocol Server')) {
+			this.pollingReady = true
+			this.syncConnectionStatus(InstanceStatus.Connecting)
+			this.startPollingTimer()
+			return
+		}
 
 		if (this.pollQueue.length === 0) return
 
@@ -979,7 +1083,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			this.pollingRerunRequested = true
 			return
 		}
-		if (!this.pollSocket?.isConnected) return
+		if (!this.pollSocket?.isConnected || !this.pollingReady) return
 		if (this.trackedPolling.size === 0) return
 
 		this.pollingInProgress = true

@@ -1,6 +1,6 @@
 {
 	"name": "companion-module-biamp-tesira",
-	"version": "3.0.3",
+	"version": "3.0.4",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {
@@ -10,6 +10,7 @@
 		"build": "rimraf dist && tsc -p tsconfig.build.json",
 		"build:main": "tsc -p tsconfig.build.json",
 		"dev": "tsc -p tsconfig.build.json --watch",
+		"test": "yarn build && node --test test/*.test.js",
 		"lint:raw": "eslint",
 		"lint": "eslint ."
 	},

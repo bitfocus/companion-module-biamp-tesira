@@ -1,6 +1,7 @@
 import { combineRgb, type CompanionFeedbackContext, type CompanionFeedbackDefinitions } from '@companion-module/base'
 import { graphics } from 'companion-module-utils'
 import type { ModuleInstance } from './main.js'
+import { parseRangeOverrides } from './range-overrides.js'
 
 type MeterMode = 'vertical-bottom-up' | 'vertical-top-down' | 'horizontal-left-right'
 
@@ -63,22 +64,6 @@ function readRangeFromVariables(
 	const max = maxRaw !== undefined ? Number.parseFloat(maxRaw) : Number.NaN
 	if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return undefined
 	return { min, max }
-}
-
-function parseRangeOverrides(raw: string): Map<string, { min: number; max: number }> {
-	const ranges = new Map<string, { min: number; max: number }>()
-	for (const entry of raw.split(/[\n;]/)) {
-		const trimmed = entry.trim()
-		if (!trimmed) continue
-		const [aliasPart, rangePart] = trimmed.split('=')
-		if (!aliasPart || !rangePart) continue
-		const [minPart, maxPart] = rangePart.split(':')
-		const min = Number(minPart)
-		const max = Number(maxPart)
-		if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) continue
-		ranges.set(aliasPart.trim(), { min, max })
-	}
-	return ranges
 }
 
 function readRangeOverride(self: ModuleInstance, alias: string | undefined): { min: number; max: number } | undefined {
