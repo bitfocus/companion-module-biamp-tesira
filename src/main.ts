@@ -13,6 +13,7 @@ import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { detectLoginPrompt } from './login-prompt.js'
+import { formatConnectionStatus } from './connection-status.js'
 
 interface TrackedSubscription {
 	cmd: string
@@ -311,14 +312,9 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	updateVariables(): void {
-		const connectionStatus = this.isReady
-			? 'Connected'
-			: this.commandReady
-				? 'Control connected; polling unavailable'
-				: 'Disconnected'
 		const values: Record<string, string> = {
 			connected: this.isReady ? 'true' : 'false',
-			connection_status: connectionStatus,
+			connection_status: formatConnectionStatus(this.commandReady, this.pollingReady),
 			last_error: this.lastError,
 			last_command: this.lastCommand,
 			last_response: this.lastResponse,

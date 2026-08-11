@@ -6,6 +6,8 @@ import { parseRangeOverrides } from '../dist/range-overrides.js'
 import { detectLoginPrompt } from '../dist/login-prompt.js'
 // eslint-disable-next-line n/no-unpublished-import -- tests exercise the compiled module output
 import { UpgradeScripts } from '../dist/upgrades.js'
+// eslint-disable-next-line n/no-unpublished-import -- tests exercise the compiled module output
+import { formatConnectionStatus } from '../dist/connection-status.js'
 
 test('parses every documented comma-separated level range override', () => {
 	const ranges = parseRangeOverrides('Lobby_Level=-80:12, Podium_Level=-40:0')
@@ -79,4 +81,11 @@ test('recognizes both bare and device-prefixed Tesira login prompts', () => {
 test('only recognizes login prompts at the end of the current line', () => {
 	assert.equal(detectLoginPrompt('login: not a prompt'), undefined)
 	assert.equal(detectLoginPrompt('Welcome to the Tesira Text Protocol Server...'), undefined)
+})
+
+test('reports all command and polling connection states', () => {
+	assert.equal(formatConnectionStatus(false, false), 'Disconnected')
+	assert.equal(formatConnectionStatus(true, false), 'Control connected; polling unavailable')
+	assert.equal(formatConnectionStatus(false, true), 'Polling connected; control unavailable')
+	assert.equal(formatConnectionStatus(true, true), 'Connected')
 })
