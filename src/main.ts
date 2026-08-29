@@ -2,7 +2,7 @@ import {
 	InstanceBase,
 	InstanceStatus,
 	TelnetHelper,
-	runEntrypoint,
+	type InstanceTypes,
 	type CompanionVariableDefinition,
 	type SomeCompanionConfigField,
 } from '@companion-module/base'
@@ -13,7 +13,9 @@ import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { detectLoginPrompt } from './login-prompt.js'
+import { scaleTesiraLevelValue, scaleTesiraMeterValue } from './meter-scale.js'
 import { formatConnectionStatus } from './connection-status.js'
+import { parseRangeOverrides } from './range-overrides.js'
 
 interface TrackedSubscription {
 	cmd: string
@@ -126,9 +128,14 @@ function extractInstanceTagFromCommand(command: string): string | undefined {
 	return instanceTag || undefined
 }
 
-export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
+interface ModuleTypes extends InstanceTypes {
+	config: ModuleConfig
+	secrets: ModuleSecrets
+}
+
+export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	config!: ModuleConfig
-	secrets: ModuleSecrets = {}
+	secrets: ModuleSecrets = { loginPassword: '' }
 	isReady = false
 	lastError = 'Not connected'
 	lastCommand = ''
@@ -150,6 +157,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	private readonly pollTimeoutMs = 5000
 
 	private trackedSubscriptions = new Map<string, TrackedSubscription>()
+	private levelVariableInstanceTags = new Map<string, string>()
 	private trackedPolling = new Map<string, PollCommand>()
 	private dynamicVariableDefinitions = new Map<string, CompanionVariableDefinition>()
 	private dynamicVariableValues = new Map<string, string>()
@@ -164,9 +172,14 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		super(internal)
 	}
 
+	// API 2 resolves useVariables options before invoking action callbacks.
+	async parseVariablesInString(value: string): Promise<string> {
+		return value
+	}
+
 	async init(config: ModuleConfig, _isFirstInit: boolean, secrets: ModuleSecrets): Promise<void> {
 		this.config = config
-		this.secrets = secrets ?? {}
+		this.secrets = secrets ?? { loginPassword: '' }
 		this.syncStartupSubscriptions()
 		this.refreshVariableDefinitions()
 		this.updateVariables()
@@ -255,6 +268,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		this.ensureVariable(maxName)
 		this.dynamicVariableValues.set(sanitizeVariableId(minName), String(min))
 		this.dynamicVariableValues.set(sanitizeVariableId(maxName), String(max))
+		this.refreshScaledLevelValues(instanceTag)
 
 		this.updatePresets()
 		this.updateVariables()
@@ -297,18 +311,19 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	refreshVariableDefinitions(): void {
-		const baseDefinitions: CompanionVariableDefinition[] = [
-			{ variableId: 'connected', name: 'Connected to Tesira' },
-			{ variableId: 'connection_status', name: 'Connection status text' },
-			{ variableId: 'last_error', name: 'Last error' },
-			{ variableId: 'last_command', name: 'Last command sent' },
-			{ variableId: 'last_response', name: 'Last response received' },
-			{ variableId: 'last_response_numeric', name: 'Last numeric response value' },
-			{ variableId: 'aliases', name: 'Latest instance tag list (aliases in Tesira TTP)' },
-			{ variableId: 'alias_count', name: 'Instance tag count' },
-		]
+		const definitions: Record<string, CompanionVariableDefinition> = {
+			connected: { name: 'Connected to Tesira' },
+			connection_status: { name: 'Connection status text' },
+			last_error: { name: 'Last error' },
+			last_command: { name: 'Last command sent' },
+			last_response: { name: 'Last response received' },
+			last_response_numeric: { name: 'Last numeric response value' },
+			aliases: { name: 'Latest instance tag list (aliases in Tesira TTP)' },
+			alias_count: { name: 'Instance tag count' },
+		}
 
-		this.setVariableDefinitions([...baseDefinitions, ...this.dynamicVariableDefinitions.values()])
+		for (const [variableId, definition] of this.dynamicVariableDefinitions) definitions[variableId] = definition
+		this.setVariableDefinitions(definitions)
 	}
 
 	updateVariables(): void {
@@ -534,8 +549,11 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 
 	private queueRangeProbeForInstance(instanceTag: string, target: 'level' | 'meter' | 'generic' = 'generic'): void {
-		if (!instanceTag) return
-		if (this.getLiveAliasRange(instanceTag)) return
+		// Audio meters and most generic DSP blocks do not implement minLevel/maxLevel.
+		// Their display ranges are fixed in the presets; only probe actual level controls.
+		if (!instanceTag || target !== 'level') return
+		if (this.getLiveLevelRange(instanceTag)) return
+		if (parseRangeOverrides(this.config?.levelRangeOverrides ?? '').has(instanceTag)) return
 
 		this.addPollingCommand(`${instanceTag} get minLevel 1`, `${instanceTag}_minLevel_1`, false, true, {
 			instanceTag,
@@ -573,6 +591,13 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		)
 
 		this.ensureVariable(request.variableName)
+		if (
+			request.attribute.toLowerCase().includes('level') &&
+			inferRangeProbeTarget(request.instanceTag, request.attribute) === 'level'
+		) {
+			this.levelVariableInstanceTags.set(variableId, request.instanceTag.trim())
+			this.ensureVariable(`${variableId}_scaled`)
+		}
 		this.trackedSubscriptions.set(variableId, {
 			cmd,
 			unsubCmd,
@@ -586,6 +611,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		if (tracked) {
 			this.sendCommand(tracked.unsubCmd)
 			this.trackedSubscriptions.delete(variableId)
+			this.levelVariableInstanceTags.delete(variableId)
 			return
 		}
 
@@ -880,7 +906,6 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		this.ensureVariable('aliases_list')
 		this.dynamicVariableValues.set('aliases_list', this.aliasList)
 		this.updatePresets()
-		this.queueDiscoveredRangePolling()
 	}
 
 	private parseOkValue(line: string, pending: PendingPoll | undefined): void {
@@ -916,6 +941,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 					if (pending.rangeProbe.bound === 'min') existing.min = parsed
 					else existing.max = parsed
 					store.set(pending.rangeProbe.instanceTag, existing)
+					this.refreshScaledLevelValues(pending.rangeProbe.instanceTag)
 					this.updatePresets()
 					this.checkFeedbacks(
 						'vu_meter_vertical',
@@ -945,32 +971,60 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		const variableId = alreadySanitized ? variableName : sanitizeVariableId(variableName)
 		const sourceName = alreadySanitized ? variableName : variableName.trim()
 		this.ensureVariable(sourceName)
+		const normalizedTokens = tokens.map((token) => normalizeNumericText(token, roundNumericValues))
 
-		if (tokens.length === 1) {
-			const normalized = normalizeNumericText(tokens[0], roundNumericValues)
-			this.dynamicVariableValues.set(variableId, normalized)
-			this.lastResponseNumeric = Number.isFinite(Number.parseFloat(tokens[0])) ? normalized : this.lastResponseNumeric
+		if (normalizedTokens.length === 1) {
+			this.dynamicVariableValues.set(variableId, normalizedTokens[0])
 		} else {
-			const normalizedTokens = tokens.map((token) => normalizeNumericText(token, roundNumericValues))
 			this.dynamicVariableValues.set(variableId, normalizedTokens.join(', '))
-			normalizedTokens.forEach((token, index) => {
-				const indexedName = `${sourceName}_${index + 1}`
-				const indexedId = sanitizeVariableId(indexedName)
-				this.ensureVariable(indexedName)
-				this.dynamicVariableValues.set(indexedId, token)
-			})
-			const firstNumeric = Number.parseFloat(normalizedTokens[0])
-			if (Number.isFinite(firstNumeric)) this.lastResponseNumeric = normalizedTokens[0]
+		}
+
+		// Tesira meter subscriptions can return either a scalar or a channel list.
+		// Always expose indexed values so native Companion gauges have one numeric source.
+		normalizedTokens.forEach((token, index) => {
+			const indexedName = `${sourceName}_${index + 1}`
+			const indexedId = sanitizeVariableId(indexedName)
+			this.ensureVariable(indexedName)
+			this.dynamicVariableValues.set(indexedId, token)
+		})
+		const firstToken = normalizedTokens[0]
+		if (firstToken !== undefined && /(?:^|_)meter(?:_|$)/i.test(sourceName)) {
+			const scaledName = `${sourceName}_scaled`
+			const scaledId = sanitizeVariableId(scaledName)
+			this.ensureVariable(scaledName)
+			this.dynamicVariableValues.set(scaledId, String(scaleTesiraMeterValue(firstToken)))
+		}
+		const levelInstanceTag = this.levelVariableInstanceTags.get(variableId)
+		if (firstToken !== undefined && levelInstanceTag) {
+			this.storeScaledLevelValue(variableId, levelInstanceTag, firstToken)
+		}
+		if (firstToken !== undefined && Number.isFinite(Number.parseFloat(firstToken))) {
+			this.lastResponseNumeric = firstToken
 		}
 
 		this.updateVariables()
+	}
+
+	private storeScaledLevelValue(variableId: string, instanceTag: string, rawValue: string): void {
+		const range = this.getLiveLevelRange(instanceTag) ??
+			parseRangeOverrides(this.config?.levelRangeOverrides ?? '').get(instanceTag) ?? { min: -100, max: 12 }
+		const scaledName = `${variableId}_scaled`
+		this.ensureVariable(scaledName)
+		this.dynamicVariableValues.set(scaledName, String(scaleTesiraLevelValue(rawValue, range.min, range.max)))
+	}
+
+	private refreshScaledLevelValues(instanceTag: string): void {
+		for (const [variableId, mappedInstanceTag] of this.levelVariableInstanceTags) {
+			if (mappedInstanceTag !== instanceTag) continue
+			const rawValue = this.dynamicVariableValues.get(variableId)
+			if (rawValue !== undefined) this.storeScaledLevelValue(variableId, instanceTag, rawValue)
+		}
 	}
 
 	private ensureVariable(variableName: string): void {
 		const variableId = sanitizeVariableId(variableName)
 		if (this.dynamicVariableDefinitions.has(variableId)) return
 		this.dynamicVariableDefinitions.set(variableId, {
-			variableId,
 			name: variableName.trim(),
 		})
 		this.refreshVariableDefinitions()
@@ -979,6 +1033,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	private syncStartupSubscriptions(): void {
 		for (const variableId of this.startupSubscriptionIds) {
 			this.trackedSubscriptions.delete(variableId)
+			this.levelVariableInstanceTags.delete(variableId)
 		}
 		this.startupSubscriptionIds.clear()
 
@@ -1045,6 +1100,16 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			.filter(Boolean)
 
 		for (const tag of tags) {
+			this.addPollingCommand(`${tag} get minLevel 1`, `${tag}_minLevel_1`, false, true, {
+				instanceTag: tag,
+				bound: 'min',
+				target: 'level',
+			})
+			this.addPollingCommand(`${tag} get maxLevel 1`, `${tag}_maxLevel_1`, false, true, {
+				instanceTag: tag,
+				bound: 'max',
+				target: 'level',
+			})
 			this.addPollingCommand(`${tag} get level 1`, `${tag}_level_1`, false, true)
 			this.addPollingCommand(`${tag} get mute 1`, `${tag}_mute_1`, false, true)
 		}
@@ -1059,23 +1124,6 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		if (tags.length > 0 || meterTags.length > 0) void this.doPolling()
-	}
-
-	private queueDiscoveredRangePolling(): void {
-		for (const alias of this.aliases) {
-			this.addPollingCommand(`${alias} get minLevel 1`, `${alias}_minLevel_1`, false, true, {
-				instanceTag: alias,
-				bound: 'min',
-				target: 'generic',
-			})
-			this.addPollingCommand(`${alias} get maxLevel 1`, `${alias}_maxLevel_1`, false, true, {
-				instanceTag: alias,
-				bound: 'max',
-				target: 'generic',
-			})
-		}
-
-		if (this.aliases.length > 0) void this.doPolling()
 	}
 
 	private async doPolling(): Promise<void> {
@@ -1127,4 +1175,5 @@ export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	}
 }
 
-runEntrypoint(ModuleInstance, UpgradeScripts)
+export { UpgradeScripts }
+export default ModuleInstance

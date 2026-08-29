@@ -1,8 +1,9 @@
 {
-	"extends": "@companion-module/tools/tsconfig/node22/recommended",
+	"extends": "@companion-module/tools/tsconfig/node22/recommended-esm.json",
 	"include": ["src/**/*.ts", "src/**/*.d.ts"],
 	"exclude": ["node_modules/**", "src/**/*spec.ts", "src/**/__tests__/*", "src/**/__mocks__/*"],
 	"compilerOptions": {
+		"noImplicitAny": false,
 		"outDir": "./dist",
 		"baseUrl": "./",
 		"paths": {

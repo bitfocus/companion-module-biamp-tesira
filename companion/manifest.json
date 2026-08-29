@@ -1,6 +1,7 @@
 {
 	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
 	"id": "biamp-tesira",
+	"type": "connection",
 	"name": "biamp-tesira",
 	"shortname": "tesira",
 	"description": "Control and meter Biamp Tesira systems over the Tesira Text Protocol",

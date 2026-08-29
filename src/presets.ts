@@ -1,5 +1,6 @@
-import { combineRgb, type CompanionPresetDefinitions } from '@companion-module/base'
+import { combineRgb } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
+import { TESIRA_METER_SCALE } from './meter-scale.js'
 import { parseRangeOverrides } from './range-overrides.js'
 
 function sanitizeVariableName(value: string): string {
@@ -35,6 +36,280 @@ function isLevelControlAlias(alias: string): boolean {
 
 function moduleVariable(self: ModuleInstance, variableId: string): string {
 	return `$(${self.label}:${variableId})`
+}
+
+const NATIVE_GAUGE_FEEDBACKS = new Set([
+	'vu_meter_vertical',
+	'vu_meter_horizontal',
+	'gain_reduction_meter',
+	'level_meter_horizontal',
+	'level_meter_with_right_vu',
+])
+
+function gaugeValue(source: unknown, fallback = 0): { isExpression: true; value: string } {
+	const expression = typeof source === 'string' || typeof source === 'number' ? String(source) : '0'
+	return {
+		isExpression: true,
+		value: `+((${expression} ?? '') === '' ? ${fallback} : ${expression})`,
+	}
+}
+
+function scaledGaugeValue(source: unknown): { isExpression: true; value: string } {
+	if (typeof source !== 'string') return gaugeValue(0)
+	const match = source.match(/^\$\(([^:]+):([A-Za-z0-9_]+)\)$/)
+	return match ? gaugeValue(`$(${match[1]}:${match[2]}_scaled)`) : gaugeValue(0)
+}
+
+function tesiraMeterGaugeStops(): Array<{ value: number; color: number; gradient: boolean }> {
+	return [
+		{ value: 0, color: combineRgb(0, 180, 70), gradient: false },
+		{ value: 6, color: combineRgb(0, 180, 70), gradient: false },
+		{ value: 6, color: combineRgb(255, 190, 0), gradient: false },
+		{ value: 10, color: combineRgb(255, 190, 0), gradient: false },
+		{ value: 10, color: combineRgb(220, 40, 20), gradient: false },
+	]
+}
+
+function formatLevelText(text: unknown, gaugeFeedbacks: any[]): string | { isExpression: true; value: string } {
+	if (typeof text !== 'string') return ''
+	const levelSource = gaugeFeedbacks
+		.map((feedback) =>
+			feedback.feedbackId === 'level_meter_with_right_vu'
+				? feedback.options?.sourceLevel
+				: feedback.feedbackId === 'level_meter_horizontal'
+					? feedback.options?.source
+					: undefined,
+		)
+		.find((source): source is string => typeof source === 'string' && text.includes(source))
+	if (!levelSource) return text
+
+	const [before, after = ''] = text.split(levelSource, 2)
+	return {
+		isExpression: true,
+		value: `concat(${JSON.stringify(before)}, (+(${levelSource}) >= 0 ? '+' : ''), toFixed(+(${levelSource}), 1), ' dB', ${JSON.stringify(after)})`,
+	}
+}
+
+function makeGaugeElements(feedback: any): any[] {
+	const options = feedback.options ?? {}
+	const common = {
+		type: 'gauge',
+		x: 3,
+		y: 3,
+		width: 94,
+		height: 94,
+		trackStyle: 'dimmed',
+		trackAmount: 25,
+		trackWidth: 100,
+		markerEnabled: false,
+		multiColour: true,
+	}
+
+	switch (feedback.feedbackId) {
+		case 'level_meter_with_right_vu': {
+			return [
+				{
+					...common,
+					id: 'tesira-level-gauge',
+					name: 'Tesira Level Gauge',
+					width: 84,
+					orientation: 'horizontal',
+					value: scaledGaugeValue(options.sourceLevel),
+					min: 0,
+					max: 100,
+					origin: 0,
+					stops: [{ value: 0, color: combineRgb(40, 150, 255), gradient: false }],
+				},
+				{
+					...common,
+					id: 'tesira-vu-gauge',
+					name: 'Tesira VU Gauge',
+					x: 90,
+					width: 7,
+					orientation: 'vertical',
+					value: scaledGaugeValue(options.sourceMeter),
+					min: 0,
+					max: TESIRA_METER_SCALE.length - 1,
+					origin: 0,
+					stops: tesiraMeterGaugeStops(),
+				},
+			]
+		}
+		case 'gain_reduction_meter': {
+			const min = Number(options.min ?? 0)
+			const max = Number(options.max ?? 30)
+			return [
+				{
+					...common,
+					id: 'tesira-gain-reduction-gauge',
+					name: 'Tesira Gain Reduction Gauge',
+					orientation: 'vertical',
+					reverse: true,
+					value: gaugeValue(options.source, min),
+					min,
+					max,
+					origin: min,
+					stops: [{ value: min, color: combineRgb(200, 70, 220), gradient: false }],
+				},
+			]
+		}
+		case 'vu_meter_vertical':
+		case 'vu_meter_horizontal': {
+			const horizontal = feedback.feedbackId === 'vu_meter_horizontal'
+			return [
+				{
+					...common,
+					id: horizontal ? 'tesira-horizontal-vu-gauge' : 'tesira-vu-gauge',
+					name: horizontal ? 'Tesira Horizontal VU Gauge' : 'Tesira VU Gauge',
+					orientation: horizontal ? 'horizontal' : 'vertical',
+					value: scaledGaugeValue(options.source),
+					min: 0,
+					max: TESIRA_METER_SCALE.length - 1,
+					origin: 0,
+					stops: tesiraMeterGaugeStops(),
+				},
+			]
+		}
+		default: {
+			return [
+				{
+					...common,
+					id: 'tesira-level-gauge',
+					name: 'Tesira Level Gauge',
+					orientation: 'horizontal',
+					value: scaledGaugeValue(options.source),
+					min: 0,
+					max: 100,
+					origin: 0,
+					stops: [{ value: 0, color: combineRgb(40, 150, 255), gradient: false }],
+				},
+			]
+		}
+	}
+}
+
+function booleanStyleOverrides(style: Record<string, unknown> | undefined): any[] {
+	if (!style) return []
+	const overrides: any[] = []
+	if (style.bgcolor !== undefined)
+		overrides.push({
+			elementId: 'tesira-background',
+			elementProperty: 'color',
+			override: { isExpression: false, value: style.bgcolor },
+		})
+	if (style.text !== undefined)
+		overrides.push({
+			elementId: 'tesira-text',
+			elementProperty: 'text',
+			override: { isExpression: false, value: style.text },
+		})
+	if (style.color !== undefined)
+		overrides.push({
+			elementId: 'tesira-text',
+			elementProperty: 'color',
+			override: { isExpression: false, value: style.color },
+		})
+	return overrides
+}
+
+function convertPresetsForCompanion5(legacyPresets: Record<string, any>): {
+	structure: any[]
+	presets: Record<string, any>
+} {
+	const sections = new Map<string, string[]>()
+	const presets: Record<string, any> = {}
+
+	for (const [id, legacy] of Object.entries(legacyPresets)) {
+		if (!legacy || legacy.type !== 'button') continue
+		const category = String(legacy.category ?? 'Tesira')
+		if (!sections.has(category)) sections.set(category, [])
+		sections.get(category)?.push(id)
+
+		const gaugeFeedbacks = legacy.feedbacks.filter((feedback: any) => NATIVE_GAUGE_FEEDBACKS.has(feedback.feedbackId))
+		if (gaugeFeedbacks.length === 0) {
+			const { category: _category, options, ...preset } = legacy
+			const style = { ...preset.style }
+			if (style.size !== undefined) style.size = String(Number(style.size) + 1)
+			presets[id] = {
+				...preset,
+				type: 'simple',
+				style,
+				options: options ? { stepAutoProgress: options.stepAutoProgress } : undefined,
+			}
+			continue
+		}
+
+		const style = legacy.style ?? {}
+		const gaugeElements = gaugeFeedbacks.flatMap(makeGaugeElements)
+		if (legacy.options?.rotaryActions) {
+			for (const gauge of gaugeElements) {
+				if (gauge.id === 'tesira-level-gauge') gauge.opacity = 60
+			}
+		}
+		const feedbacks = legacy.feedbacks
+			.filter((feedback: any) => !NATIVE_GAUGE_FEEDBACKS.has(feedback.feedbackId))
+			.map((feedback: any) => ({
+				...feedback,
+				style: undefined,
+				styleOverrides: booleanStyleOverrides(feedback.style),
+			}))
+
+		presets[id] = {
+			type: 'layered',
+			name: legacy.name,
+			canvas: { decoration: style.show_topbar ? 'topbar' : 'border' },
+			elements: [
+				{
+					id: 'tesira-background',
+					name: 'Background',
+					type: 'box',
+					x: 0,
+					y: 0,
+					width: 100,
+					height: 100,
+					color: style.bgcolor ?? combineRgb(0, 0, 0),
+				},
+				...gaugeElements,
+				{
+					id: 'tesira-image',
+					name: 'Image',
+					type: 'image',
+					x: 0,
+					y: 0,
+					width: 100,
+					height: 100,
+					base64Image: style.png64 ?? null,
+					fillMode: 'fit',
+				},
+				{
+					id: 'tesira-text',
+					name: 'Text',
+					type: 'text',
+					x: 0,
+					y: 0,
+					width: 100,
+					height: 100,
+					text: formatLevelText(style.text, gaugeFeedbacks),
+					fontsize: 20,
+					fontsizeAllowShrink: true,
+					color: style.color ?? combineRgb(255, 255, 255),
+					halign: 'center',
+					valign: 'center',
+				},
+			],
+			steps: legacy.steps,
+			feedbacks,
+		}
+	}
+
+	return {
+		structure: [...sections].map(([name, definitions], index) => ({
+			id: `tesira-${index + 1}`,
+			name,
+			definitions,
+		})),
+		presets,
+	}
 }
 
 function parsePairOverrides(raw: string): Map<string, string> {
@@ -130,10 +405,11 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const CATEGORY_LEVEL = '05 Level Controls (Discovered)'
 	const CATEGORY_ROUTERS = '06 Routers (Discovered)'
 	const CATEGORY_METERS = '07 VU Meters (Discovered)'
-	const CATEGORY_KNOBS = '08 Knob Presets (Discovered)'
-	const CATEGORY_COUGH = '09 Cough Mute (momentary mute) (Discovered)'
-	const CATEGORY_TALK = '10 Talk (momentary unmute) (Discovered)'
-	const CATEGORY_LATCH_TALK = '11 Latching Talk (Discovered)'
+	const CATEGORY_METERS_HORIZONTAL = '08 Horizontal VU Meters (Discovered)'
+	const CATEGORY_KNOBS = '09 Knob Presets (Discovered)'
+	const CATEGORY_COUGH = '10 Cough Mute (momentary mute) (Discovered)'
+	const CATEGORY_TALK = '11 Talk (momentary unmute) (Discovered)'
+	const CATEGORY_LATCH_TALK = '12 Latching Talk (Discovered)'
 	const pairOverrides = parsePairOverrides(self.config.pairOverrides ?? '')
 	const rangeOverrides = parseRangeOverrides(self.config.levelRangeOverrides ?? '')
 	const sourceSelectorNames = parseSourceSelectorNames(self.config.sourceSelectorNames ?? '')
@@ -148,7 +424,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const manualMuteVar = 'manual_mute_1'
 	const manualMeterVar = 'manual_meter_1'
 	const manualGrVar = 'manual_gain_reduction'
-	const presets: CompanionPresetDefinitions = {
+	const presets: Record<string, any> = {
 		manual_refresh: {
 			type: 'button',
 			category: CATEGORY_MANUAL,
@@ -559,7 +835,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 							actionId: 'subscribe_helper',
 							options: {
 								instanceTag: manualMeterAlias,
-								templateId: 'audio_meter_peak_rms__level',
+								templateId: 'audio_meter_peak_rms___level',
 								customAttribute: 'level',
 								index1: '1',
 								index2: '',
@@ -587,7 +863,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 						meterMax: 20,
 						padding: 2,
 					},
-					style: {},
 				},
 			],
 		},
@@ -640,7 +915,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 							actionId: 'subscribe_helper',
 							options: {
 								instanceTag: manualMeterAlias,
-								templateId: 'audio_meter_peak_rms__level',
+								templateId: 'audio_meter_peak_rms___level',
 								customAttribute: 'level',
 								index1: '1',
 								index2: '',
@@ -709,7 +984,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 						meterMax: 20,
 						padding: 2,
 					},
-					style: {},
 				},
 			],
 		},
@@ -731,7 +1005,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 							actionId: 'subscribe_helper',
 							options: {
 								instanceTag: manualMeterAlias,
-								templateId: 'audio_meter_peak_rms__level',
+								templateId: 'audio_meter_peak_rms___level',
 								customAttribute: 'level',
 								index1: '1',
 								index2: '',
@@ -755,7 +1029,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 						max: 20,
 						padding: 2,
 					},
-					style: {},
 				},
 			],
 		},
@@ -801,7 +1074,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 						max: 30,
 						padding: 2,
 					},
-					style: {},
 				},
 			],
 		},
@@ -1304,7 +1576,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 											actionId: 'subscribe_helper',
 											options: {
 												instanceTag: pairedMeterAlias,
-												templateId: 'audio_meter_peak_rms__level',
+												templateId: 'audio_meter_peak_rms___level',
 												customAttribute: 'level',
 												index1: '1',
 												index2: '',
@@ -1336,7 +1608,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 										meterMax: pairedMeterRange.max,
 										padding: 2,
 									},
-									style: {},
 								},
 							]
 						: [
@@ -1349,7 +1620,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 										max: range.max,
 										padding: 2,
 									},
-									style: {},
 								},
 							]),
 				],
@@ -1406,7 +1676,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 											actionId: 'subscribe_helper',
 											options: {
 												instanceTag: pairedMeterAlias,
-												templateId: 'audio_meter_peak_rms__level',
+												templateId: 'audio_meter_peak_rms___level',
 												customAttribute: 'level',
 												index1: '1',
 												index2: '',
@@ -1479,7 +1749,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 										meterMax: pairedMeterRange.max,
 										padding: 2,
 									},
-									style: {},
 								},
 							]
 						: [
@@ -1492,7 +1761,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 										max: range.max,
 										padding: 2,
 									},
-									style: {},
 								},
 							]),
 				],
@@ -1592,7 +1860,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 								max: range.max,
 								padding: 2,
 							},
-							style: {},
 						},
 					],
 				}
@@ -1845,7 +2112,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 								actionId: 'subscribe_helper',
 								options: {
 									instanceTag: alias,
-									templateId: 'audio_meter_peak_rms__level',
+									templateId: 'audio_meter_peak_rms___level',
 									customAttribute: 'level',
 									index1: '1',
 									index2: '',
@@ -1869,7 +2136,52 @@ export function UpdatePresets(self: ModuleInstance): void {
 							max: meterRange.max,
 							padding: 2,
 						},
-						style: {},
+					},
+				],
+			}
+
+			presets[`alias_vu_horizontal_${safeAlias}`] = {
+				type: 'button',
+				category: CATEGORY_METERS_HORIZONTAL,
+				name: `${alias} horizontal VU`,
+				style: {
+					text: makeTextLabel([aliasLabel, 'VU']),
+					size: '14',
+					color: combineRgb(255, 255, 255),
+					bgcolor: combineRgb(15, 15, 15),
+					show_topbar: false,
+				},
+				steps: [
+					{
+						down: [
+							{
+								actionId: 'subscribe_helper',
+								options: {
+									instanceTag: alias,
+									templateId: 'audio_meter_peak_rms___level',
+									customAttribute: 'level',
+									index1: '1',
+									index2: '',
+									variableName: meterVar,
+									rate: METER_SUBSCRIPTION_RATE,
+									roundNumericValues: false,
+									getInitial: true,
+								},
+							},
+						],
+						up: [],
+					},
+				],
+				feedbacks: [
+					{
+						feedbackId: 'vu_meter_horizontal',
+						options: {
+							source: moduleVariable(self, meterVar),
+							instanceTag: alias,
+							min: meterRange.min,
+							max: meterRange.max,
+							padding: 2,
+						},
 					},
 				],
 			}
@@ -1918,12 +2230,12 @@ export function UpdatePresets(self: ModuleInstance): void {
 							max: 30,
 							padding: 2,
 						},
-						style: {},
 					},
 				],
 			}
 		}
 	}
 
-	self.setPresetDefinitions(presets)
+	const companion5 = convertPresetsForCompanion5(presets)
+	self.setPresetDefinitions(companion5.structure, companion5.presets)
 }
