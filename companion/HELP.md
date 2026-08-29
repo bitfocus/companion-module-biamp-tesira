@@ -40,12 +40,12 @@ Tesira Software calls these `Instance ID's`, however the Tesira Text Protocol ca
 ### Companion version compatibility
 
 - Companion 5 uses module version 4.x and renders newly added meter presets with native, scalable gauge layers.
-- Companion 4 remains supported by module version 3.x, which uses the original image-buffer meters.
+- Companion 4 remains supported by module version 3.1.0, which uses the original image-buffer meters.
 - Imported buttons containing the older image-buffer feedbacks remain supported in Companion 5. New presets use native gauges with the layer order background, gauge, image, then text.
 
 #### Upgrading from module 3.x
 
-Module 4.x requires Companion 5 because it uses module API 2 and native layered gauges. Keep module 3.x installed when the host must remain on Companion 4.
+Module 4.x requires Companion 5 because it uses module API 2 and native layered gauges. Keep module 3.1.0 installed when the host must remain on Companion 4.
 
 After upgrading to module 4.x, re-add meter and rotary presets to receive their native gauge layers and normalized gauge-variable sources. Existing placed buttons keep their stored Companion 4 definitions; importing them remains supported, but they are not rewritten automatically.
 

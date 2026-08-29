@@ -5,7 +5,7 @@ Bitfocus Companion module for controlling and monitoring Biamp Tesira systems th
 ## Compatibility
 
 - Module 4.x targets Companion 5 and uses the Companion module API 2 runtime.
-- Module 3.x remains the supported line for Companion 4.
+- Module 3.1.0 remains the supported release for Companion 4.
 - Legacy image-buffer meter feedbacks remain available when a Companion 4 configuration is imported into Companion 5.
 
 ## Features

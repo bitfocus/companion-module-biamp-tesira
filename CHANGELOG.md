@@ -25,6 +25,7 @@
 - VU subscriptions, first-channel numeric publication, mute-state layer overrides, and initial gauge scaling.
 - Login prompt handling, polling status reporting, range parsing, and legacy subscription migration regressions.
 
-## 3.0.4
+## 3.1.0
 
+- Companion 4 / module API 1 release containing the functionality originally submitted as 3.0.4.
 - Fixed Tesira connection handling and secured login support.
