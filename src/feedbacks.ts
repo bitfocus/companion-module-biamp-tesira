@@ -1,9 +1,14 @@
-import { combineRgb, type CompanionFeedbackContext, type CompanionFeedbackDefinitions } from '@companion-module/base'
+import { combineRgb, type CompanionFeedbackContext } from '@companion-module/base'
 import { graphics } from 'companion-module-utils'
 import type { ModuleInstance } from './main.js'
 import { parseRangeOverrides } from './range-overrides.js'
 
 type MeterMode = 'vertical-bottom-up' | 'vertical-top-down' | 'horizontal-left-right'
+
+// Companion 5 transports advanced-feedback pixel buffers as base64 strings.
+function encodeImageBuffer(image: Uint8Array): string {
+	return Buffer.from(image).toString('base64')
+}
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, value))
@@ -14,13 +19,12 @@ function parseResolvedNumber(value: string): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined
 }
 
-async function resolveNumber(context: CompanionFeedbackContext, source: unknown): Promise<number | undefined> {
-	const resolved = await context.parseVariablesInString(typeof source === 'string' ? source : '')
-	return parseResolvedNumber(resolved.trim())
+async function resolveNumber(_context: CompanionFeedbackContext, source: unknown): Promise<number | undefined> {
+	return parseResolvedNumber(typeof source === 'string' ? source.trim() : '')
 }
 
-async function resolveText(context: CompanionFeedbackContext, source: unknown): Promise<string> {
-	return (await context.parseVariablesInString(typeof source === 'string' ? source : '')).trim()
+async function resolveText(_context: CompanionFeedbackContext, source: unknown): Promise<string> {
+	return typeof source === 'string' ? source.trim() : ''
 }
 
 function resolveImageSize(image: { width: number; height: number } | undefined): { width: number; height: number } {
@@ -354,7 +358,7 @@ function buildUnifiedMeterBuffers(
 }
 
 export function UpdateFeedbacks(self: ModuleInstance): void {
-	const feedbacks: CompanionFeedbackDefinitions = {
+	const feedbacks: Record<string, any> = {
 		connected: {
 			name: 'Connected to Tesira',
 			type: 'boolean',
@@ -464,9 +468,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: true,
 				},
 			],
-			callback: async (feedback, context) => {
-				let source = await context.parseVariablesInString(String(feedback.options.source ?? ''))
-				let expected = await context.parseVariablesInString(String(feedback.options.expected ?? ''))
+			callback: async (feedback, _context) => {
+				let source = String(feedback.options.source ?? '')
+				let expected = String(feedback.options.expected ?? '')
 				if (feedback.options.ignoreCase) {
 					source = source.toLowerCase()
 					expected = expected.toLowerCase()
@@ -508,8 +512,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					],
 				},
 			],
-			callback: async (feedback, context) => {
-				const source = (await context.parseVariablesInString(String(feedback.options.source ?? '')))
+			callback: async (feedback, _context) => {
+				const source = String(feedback.options.source ?? '')
 					.trim()
 					.toLowerCase()
 				return source === String(feedback.options.mutedWhen ?? 'true').toLowerCase()
@@ -1975,6 +1979,28 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 			},
 		},
+	}
+
+	for (const feedback of Object.values(feedbacks)) {
+		if (feedback?.type !== 'advanced') continue
+		feedback.affectedProperties = ['imageBuffer']
+
+		const callback = feedback.callback
+		feedback.callback = async (event, context) => {
+			const result = await callback(event, context)
+			return {
+				...result,
+				imageBuffer:
+					typeof result.imageBuffer === 'string' || result.imageBuffer === undefined
+						? result.imageBuffer
+						: encodeImageBuffer(result.imageBuffer),
+				// companion-module-utils stores pixels as alpha followed by RGB bytes.
+				imageBufferEncoding: result.imageBufferEncoding ?? { pixelFormat: 'ARGB' },
+				imageBufferPosition:
+					result.imageBufferPosition ??
+					(event.image ? { x: 0, y: 0, width: event.image.width, height: event.image.height } : undefined),
+			}
+		}
 	}
 
 	self.setFeedbackDefinitions(feedbacks)

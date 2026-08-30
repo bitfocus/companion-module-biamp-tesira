@@ -29,13 +29,31 @@ Tesira Software calls these `Instance ID's`, however the Tesira Text Protocol ca
 - matrix mixer crosspoint on/off/toggle/query controls
 - matrix mixer crosspoint level set/adjust/query controls
 - rotary level button presets with mute on press
-- VU, gain reduction, and horizontal level meter feedbacks
+- VU, peak, gain reduction, horizontal level, and horizontal VU meter workflows
 - a flexible meter builder for more advanced meter layouts
 - startup subscriptions, so the module can subscribe to key feedback information upon module startup
 - automatic control-to-meter pairing when instance tags follow a consistent naming pattern
 - live min/max range probing for discovered controls that expose `minLevel` and `maxLevel`
 - manual overrides when the Tesira file cannot be renamed
 - raw and custom command paths for advanced Tesira attributes
+
+### Companion version compatibility
+
+- Companion 5 uses module version 4.x and renders newly added meter presets with native, scalable gauge layers.
+- Companion 4 remains supported by module version 3.1.0, which uses the original image-buffer meters.
+- Imported buttons containing the older image-buffer feedbacks remain supported in Companion 5. New presets use native gauges with the layer order background, gauge, image, then text.
+
+#### Upgrading from module 3.x
+
+Module 4.x requires Companion 5 because it uses module API 2 and native layered gauges. Keep module 3.1.0 installed when the host must remain on Companion 4.
+
+After upgrading to module 4.x, re-add meter and rotary presets to receive their native gauge layers and normalized gauge-variable sources. Existing placed buttons keep their stored Companion 4 definitions; importing them remains supported, but they are not rewritten automatically.
+
+Native Companion 5 level gauges use a stable `0–100` display domain calculated by the module from the Level block's live range. VU and peak gauges follow Tesira's non-linear markings:
+
+- green: `-64, -54, -45, -38, -27, -18, 0 dB`
+- yellow: `0, +6, +12, +18, +24 dB`
+- red: `+24, +30, +36 dB`
 
 ## Tesira Setup
 
@@ -119,7 +137,7 @@ In the Companion module config:
 
 ### 2. The most important Companion settings
 
-These three settings are the key to making the module feel polished in daily use:
+These settings are the key to making the module feel polished in daily use:
 
 - `Always subscribe these level control instance tags`
 - `Always subscribe these VU meter instance tags`
@@ -127,7 +145,7 @@ These three settings are the key to making the module feel polished in daily use
 - `Level range overrides`
 - `Source selector names`
 
-The module will now also probe discovered Instance ID's for live `minLevel` and `maxLevel` values when Tesira exposes them. It will retry those one-shot probes again when a control or meter Instance ID is actually subscribed, so level meters, VU meters, knob feedbacks, and other meter-style feedbacks can follow the real Tesira range instead of assuming a generic span.
+When a Level-style control is subscribed, the module queries its live `minLevel` and `maxLevel` values and publishes a normalized gauge value. Audio Meter blocks do not expose those range attributes, so VU and peak gauges use the fixed Tesira meter scale documented above.
 
 #### Always subscribe these level control instance tags
 
@@ -206,16 +224,11 @@ However, when a discovered Level block supports:
 - `get minLevel 1`
 - `get maxLevel 1`
 
-the module now probes those values automatically after discovery and uses them for the horizontal level feedback range.
+the module probes those values when the Level control is subscribed and uses them to normalize Companion 5 level gauges.
 
 If the block does not expose those attributes, or if you want to force a specific range, add an override.
 
-The module now does the same style of live probing anywhere Tesira exposes:
-
-- `get minLevel 1`
-- `get maxLevel 1`
-
-That includes the discovered level and meter workflows, and any manual meter feedback where you enter the relevant `Instance ID for live range`.
+Range probing is intentionally limited to Level-style controls. Do not configure an Audio Meter block as a level-range source; Tesira rejects `minLevel` and `maxLevel` on those blocks.
 
 Format:
 
@@ -278,10 +291,11 @@ The module now organizes presets in this order:
 - `05 Level Controls (Discovered)`
 - `06 Routers (Discovered)`
 - `07 VU Meters (Discovered)`
-- `08 Knob Presets (Discovered)`
-- `09 Cough Mute (momentary mute) (Discovered)`
-- `10 Talk (momentary unmute) (Discovered)`
-- `11 Latching Talk (Discovered)`
+- `08 Horizontal VU Meters (Discovered)`
+- `09 Knob Presets (Discovered)`
+- `10 Cough Mute (momentary mute) (Discovered)`
+- `11 Talk (momentary unmute) (Discovered)`
+- `12 Latching Talk (Discovered)`
 
 ### 01 Manual controls
 
@@ -377,9 +391,14 @@ They are intended for:
 These are discovered meter buttons for:
 
 - audio meters
+- peak and RMS meters
 - gain reduction sources such as compressors, limiters, AGC, and gates
 
-### 08 Knob Presets (Discovered)
+### 08 Horizontal VU Meters (Discovered)
+
+These presets use the same Tesira VU/peak scale in a horizontal layout for wide controls such as Stream Deck + touch strips.
+
+### 09 Knob Presets (Discovered)
 
 These are the main “operator” presets for systems that want a compact combined control.
 
@@ -397,7 +416,7 @@ This is ideal for:
 - conference mic channels
 - small control pages where one control should do a lot
 
-### 09 Cough Mute (momentary mute) (Discovered)
+### 10 Cough Mute (momentary mute) (Discovered)
 
 Behavior:
 
@@ -409,7 +428,7 @@ Use for:
 - commentator cough
 - live mic momentary mute
 
-### 10 Talk (momentary unmute) (Discovered)
+### 11 Talk (momentary unmute) (Discovered)
 
 Behavior:
 
@@ -422,7 +441,7 @@ Use for:
 - producer comms
 - booth-to-stage momentary talk
 
-### 11 Latching Talk (Discovered)
+### 12 Latching Talk (Discovered)
 
 Behavior:
 
@@ -454,13 +473,25 @@ The module includes named meter feedbacks and a more powerful configurable one.
 
 The horizontal level variants allow the user to choose the horizontal meter colour.
 
-For manual or custom meter feedbacks, the meter feedbacks now include an `Instance ID for live range` field, or separate level and VU Instance ID fields on combined layouts.
+The image-buffer feedbacks are retained for imported Companion 4 buttons. New Companion 5 presets replace those feedbacks with native gauge layers.
+
+### Gauge variables
+
+The native presets use normalized numeric variables generated alongside the raw Tesira subscription values:
+
+- Level subscriptions publish `<variable>_scaled` on a `0–100` scale. The module uses the live Level-block range, then a configured range override, then `-100` to `+12 dB` as the startup fallback.
+- Audio Meter subscriptions publish `<variable>_scaled` on a `0–12` scale, matching the equal visual steps in Tesira's non-linear VU/peak scale.
+- Raw subscription variables remain available for button text, custom expressions, and existing configurations.
+
+These normalized variables avoid Companion evaluating an incomplete range expression while a button is first loading. Re-add an older preset after upgrading when you want it to use the new source automatically.
+
+For manual or custom legacy feedbacks, range fields remain available. Live range lookup is appropriate for Level controls; VU and peak meters should use explicit meter bounds because Audio Meter blocks do not expose `minLevel` and `maxLevel`.
 
 Use those fields when:
 
 - you are building manually instead of using discovered presets
 - the feedback source variable does not follow the module's discovered naming
-- you still want the feedback to use the real Tesira min/max range
+- a Level control needs its real Tesira min/max range or a configured override
 
 ### Flexible Meter
 
@@ -527,9 +558,9 @@ This is a good practical balance for most Tesira systems:
 ## Notes And Limits
 
 - Tesira subscriptions are session-based. If the connection drops, Tesira loses the subscriptions. The module re-sends tracked subscriptions after reconnect.
-- alias discovery only returns instance tags, but the module now follows discovery with live `minLevel` and `maxLevel` probes for all discovered Instance ID's and retries those probes again when controls and meters are subscribed
-- automatic live range matching works best for discovered presets and for manual/custom meter feedbacks where you fill in the `Instance ID for live range` field
-- if a Tesira object does not expose `minLevel` and `maxLevel`, `Level range overrides` or the explicit feedback min/max fields are still the correct fallback
+- alias discovery returns instance tags only; live `minLevel` and `maxLevel` probes run when Level-style controls are subscribed
+- Audio Meter blocks do not support `minLevel` and `maxLevel`; Companion 5 VU/peak gauges use the fixed Tesira scale and legacy feedbacks use their explicit bounds
+- if a Level control does not expose `minLevel` and `maxLevel`, use `Level range overrides` or explicit legacy-feedback bounds
 - the module uses a second telnet session for recurring polling so GET traffic does not interfere with subscription traffic
 
 ## References

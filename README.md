@@ -1,40 +1,37 @@
 # companion-module-biamp-tesira
 
-Companion v3 module for Biamp Tesira systems using the Tesira Text Protocol.
+Bitfocus Companion module for controlling and monitoring Biamp Tesira systems through the Tesira Text Protocol.
 
-This local v3 rewrite keeps the upstream module identity while modernising the implementation around:
+## Compatibility
 
-- dual Tesira telnet sessions for control and recurring GET polling
-- tracked subscriptions with automatic re-subscribe after reconnect
-- dynamic variables for subscription and polling values, including indexed array members
-- user-friendly helper actions for level, mute, presets, alias discovery, generic commands, subscriptions, and polling
-- discovered starter presets for level blocks, source routers/selectors, and meters
-- selector source-name overrides and per-output router discovery presets
-- three meter-oriented advanced feedbacks:
-  - VU meter: vertical, bottom-to-top, multi-colour
-  - Gain reduction meter: vertical, top-to-bottom, red
-  - Level meter: horizontal, left-to-right
+- Module 4.x targets Companion 5 and uses the Companion module API 2 runtime.
+- Module 3.1.0 remains the supported release for Companion 4.
+- Legacy image-buffer meter feedbacks remain available when a Companion 4 configuration is imported into Companion 5.
 
-The subscription helper templates were built from the Biamp Tesira Text Protocol subscription matrix and cover the documented subscription-capable block and attribute pairs from the Biamp support articles.
+## Features
 
-See [HELP.md](./companion/HELP.md) for operator-facing usage notes.
+- Dual Tesira telnet sessions for commands and recurring polling.
+- Tracked subscriptions with automatic re-subscription after reconnect.
+- Level, mute, preset, matrix, router, source-selector, polling, and raw-command actions.
+- Automatic instance-tag discovery and control-to-meter pairing.
+- Manual and discovered presets for buttons, rotary controls, cough/talk workflows, and meters.
+- Companion 5 layered presets with scalable level, vertical VU, horizontal VU, peak, and gain-reduction gauges.
+- Tesira-style non-linear VU/peak scaling from `-64 dB` through `+36 dB`.
+- Native gauge ordering below button images and text, including wide-button support.
+- Normalized numeric gauge variables, live Level-block range detection, and optional range/pairing overrides.
+
+See [HELP.md](./companion/HELP.md) for setup, upgrade, preset, and troubleshooting guidance.
 
 ## Development
 
-Install dependencies:
+Install dependencies and run the release checks:
 
 ```bash
 yarn install
+yarn test
+yarn lint
+yarn companion-module-check
+yarn package
 ```
 
-Build once:
-
-```bash
-yarn build
-```
-
-Lint the source:
-
-```bash
-yarn lint:raw src
-```
+The package command writes `biamp-tesira-<version>.tgz` in the repository root.

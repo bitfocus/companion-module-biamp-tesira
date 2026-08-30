@@ -1,4 +1,3 @@
-import type { CompanionActionDefinitions } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
 import { SUBSCRIPTION_TEMPLATE_CHOICES, getTemplateById } from './protocol.js'
 
@@ -33,7 +32,7 @@ const optionTooltips: Record<string, string> = {
 	intervalMs: 'Repeat interval in milliseconds for held level adjustments.',
 }
 
-function applyOptionTooltips(actions: CompanionActionDefinitions): void {
+function applyOptionTooltips(actions: Record<string, any>): void {
 	for (const action of Object.values(actions)) {
 		if (!action) continue
 		for (const option of action.options ?? []) {
@@ -46,7 +45,7 @@ function applyOptionTooltips(actions: CompanionActionDefinitions): void {
 }
 
 export function UpdateActions(self: ModuleInstance): void {
-	const actions: CompanionActionDefinitions = {
+	const actions: Record<string, any> = {
 		recall_preset: {
 			name: 'Recall preset',
 			options: [
@@ -358,6 +357,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					type: 'dropdown',
 					label: 'Command',
 					default: 'set',
+					disableAutoExpression: true,
 					choices: [
 						{ id: 'set', label: 'Set' },
 						{ id: 'increment', label: 'Increment' },
@@ -371,7 +371,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					label: 'Level / amount (dB)',
 					default: '0',
 					useVariables: true,
-					isVisible: (options) => options.command !== 'get',
+					isVisibleExpression: "$(options:command) != 'get'",
 				},
 			],
 			callback: async (action) => {
@@ -496,7 +496,8 @@ export function UpdateActions(self: ModuleInstance): void {
 					id: 'templateId',
 					type: 'dropdown',
 					label: 'Subscription template',
-					default: 'audio_meter_peak_rms__level',
+					default: 'audio_meter_peak_rms___level',
+					disableAutoExpression: true,
 					choices: SUBSCRIPTION_TEMPLATE_CHOICES,
 				},
 				{
@@ -505,7 +506,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					label: 'Custom attribute',
 					default: 'level',
 					useVariables: true,
-					isVisible: (options) => options.templateId === 'custom',
+					isVisibleExpression: "$(options:templateId) == 'custom'",
 				},
 				{
 					id: 'index1',
