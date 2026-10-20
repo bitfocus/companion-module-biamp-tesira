@@ -1,7 +1,6 @@
 import { combineRgb, type CompanionFeedbackContext } from '@companion-module/base'
 import { graphics } from 'companion-module-utils'
 import type { ModuleInstance } from './main.js'
-import { parseRangeOverrides } from './range-overrides.js'
 
 type MeterMode = 'vertical-bottom-up' | 'vertical-top-down' | 'horizontal-left-right'
 
@@ -72,7 +71,7 @@ function readRangeFromVariables(
 
 function readRangeOverride(self: ModuleInstance, alias: string | undefined): { min: number; max: number } | undefined {
 	if (!alias) return undefined
-	return parseRangeOverrides(self.config.levelRangeOverrides ?? '').get(alias)
+	return self.getLevelRangeOverrides().get(alias)
 }
 
 function inferAliasFromSource(
@@ -633,6 +632,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					id: 'instanceTag',
 					type: 'textinput',
 					label: 'Instance ID for live range',
+					tooltip:
+						'Instance tag of the block. Needed to use the device range or a Level range override; when blank, Minimum dB and Maximum dB below are used.',
 					default: '',
 				},
 				{
@@ -709,6 +710,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					id: 'instanceTag',
 					type: 'textinput',
 					label: 'Instance ID for live range',
+					tooltip:
+						'Instance tag of the block. Needed to use the device range or a Level range override; when blank, Minimum dB and Maximum dB below are used.',
 					default: '',
 				},
 				{
@@ -774,6 +777,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					id: 'instanceTag',
 					type: 'textinput',
 					label: 'Instance ID for live range',
+					tooltip:
+						'Instance tag of the block. Needed to use the device range or a Level range override; when blank, Minimum dB and Maximum dB below are used.',
 					default: '',
 				},
 				{
@@ -1041,6 +1046,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					id: 'instanceTag',
 					type: 'textinput',
 					label: 'Instance ID for live range',
+					tooltip:
+						'Instance tag of the block. Needed to use the device range or a Level range override; when blank, Minimum dB and Maximum dB below are used.',
 					default: '',
 				},
 				{
@@ -1107,6 +1114,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					id: 'instanceTag',
 					type: 'textinput',
 					label: 'Instance ID for live range',
+					tooltip:
+						'Instance tag of the block. Needed to use the device range or a Level range override; when blank, Minimum dB and Maximum dB below are used.',
 					default: '',
 				},
 				{

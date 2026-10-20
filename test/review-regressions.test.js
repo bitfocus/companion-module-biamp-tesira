@@ -32,52 +32,135 @@ test('ignores malformed and reversed level range overrides', () => {
 	assert.deepEqual([...ranges], [['Valid', { min: -20, max: 5 }]])
 })
 
+// Companion 5 hands upgrade scripts every option as { isExpression, value }
+const v = (value) => ({ isExpression: false, value })
+const runUpgrades = (actions, scripts = UpgradeScripts) => {
+	const updated = new Set()
+	for (const script of scripts) {
+		const result = script({}, { config: null, secrets: null, actions, feedbacks: [] })
+		for (const action of result.updatedActions) updated.add(action)
+	}
+	return [...updated]
+}
+
 test('migrates the legacy subscription attribute into the custom attribute fields', () => {
 	const action = {
+		id: 'a',
+		controlId: 'c',
 		actionId: 'subscribeParameter',
 		options: {
-			instanceID: 'Lobby_Level',
-			attribute: 'level',
-			index: 1,
-			customvar: 'lobby_level',
+			instanceID: v('Lobby_Level'),
+			attribute: v('level'),
+			index: v(1),
+			customvar: v('lobby_level'),
 		},
 	}
 
-	const result = UpgradeScripts[0](
-		{},
-		{
-			config: {},
-			secrets: undefined,
-			actions: [action],
-			feedbacks: [],
-		},
-	)
+	const updated = runUpgrades([action])
 
-	assert.equal(result.updatedActions.length, 1)
+	assert.equal(updated.length, 1)
 	assert.equal(action.actionId, 'subscribe_helper')
 	assert.deepEqual(action.options, {
-		instanceTag: 'Lobby_Level',
-		templateId: 'custom',
-		customAttribute: 'level',
-		index1: '1',
-		variableName: 'lobby_level',
+		instanceTag: v('Lobby_Level'),
+		templateId: v('custom'),
+		customAttribute: v('level'),
+		index1: v('1'),
+		variableName: v('lobby_level'),
 	})
+})
+
+test('migrates v3 custom attribute subscription buttons in the second upgrade script', () => {
+	// Created under v3: the first script has already run for this connection
+	const action = {
+		id: 'a',
+		controlId: 'c',
+		actionId: 'subscribe_helper',
+		options: { instanceTag: v('Lobby_Level'), attribute: v('mute'), index1: v('1'), variableName: v('lobby_mute') },
+	}
+
+	const updated = runUpgrades([action], UpgradeScripts.slice(1))
+
+	assert.equal(updated.length, 1)
+	assert.deepEqual(action.options, {
+		instanceTag: v('Lobby_Level'),
+		templateId: v('custom'),
+		customAttribute: v('mute'),
+		index1: v('1'),
+		variableName: v('lobby_mute'),
+	})
+})
+
+test('maps the v3 meter preset template id onto the corrected id', () => {
+	const action = {
+		id: 'a',
+		controlId: 'c',
+		actionId: 'subscribe_helper',
+		options: { instanceTag: v('Meter1'), templateId: v('audio_meter_peak_rms__level'), variableName: v('m') },
+	}
+
+	runUpgrades([action], UpgradeScripts.slice(1))
+
+	assert.deepEqual(action.options.templateId, v('audio_meter_peak_rms___level'))
+	assert.ok(getTemplateById(action.options.templateId.value))
+})
+
+test('keeps the hold interval as a wrapped number when upgrading hold buttons', () => {
+	const action = {
+		id: 'a',
+		controlId: 'c',
+		actionId: 'incFaderLevelTimer',
+		options: { instanceID: v('Lobby_Level'), amount: v(1), rate: v(250) },
+	}
+
+	runUpgrades([action])
+
+	assert.equal(action.actionId, 'level_hold_start')
+	assert.deepEqual(action.options.intervalMs, v(250))
+	assert.equal(action.options.rate, undefined)
+	assert.deepEqual(action.options.instanceTag, v('Lobby_Level'))
+	assert.deepEqual(action.options.amount, v('1'))
+})
+
+test('falls back to 500 ms for an unreadable hold interval', () => {
+	const action = { id: 'a', controlId: 'c', actionId: 'incFaderLevelTimer', options: { rate: v('fast') } }
+
+	runUpgrades([action])
+
+	assert.deepEqual(action.options.intervalMs, v(500))
+})
+
+test('leaves expression options untouched during upgrades', () => {
+	const expression = { isExpression: true, value: '$(local:rate) * 2' }
+	const action = {
+		id: 'a',
+		controlId: 'c',
+		actionId: 'incFaderLevelTimer',
+		options: { rate: expression, amount: { isExpression: true, value: '$(local:step)' } },
+	}
+
+	runUpgrades([action])
+
+	assert.deepEqual(action.options.intervalMs, expression)
+	assert.deepEqual(action.options.amount, { isExpression: true, value: '$(local:step)' })
 })
 
 test('keeps the legacy unsubscribe attribute unchanged', () => {
 	const action = {
+		id: 'a',
+		controlId: 'c',
 		actionId: 'unsubscribeParameter',
 		options: {
-			attribute: 'mute',
-			index: 1,
-			customvar: 'lobby_mute',
+			attribute: v('mute'),
+			index: v(1),
+			customvar: v('lobby_mute'),
 		},
 	}
 
-	UpgradeScripts[0]({}, { config: {}, secrets: undefined, actions: [action], feedbacks: [] })
+	runUpgrades([action])
 
 	assert.equal(action.actionId, 'unsubscribe_helper')
-	assert.equal(action.options.attribute, 'mute')
+	assert.deepEqual(action.options.attribute, v('mute'))
+	assert.deepEqual(action.options.index1, v('1'))
 })
 
 test('recognizes both bare and device-prefixed Tesira login prompts', () => {
@@ -107,6 +190,7 @@ test('encodes visual feedback buffers for Companion 5 and respects wide button d
 		getLiveAliasRange: () => undefined,
 		getLiveLevelRange: () => undefined,
 		getLiveMeterRange: () => undefined,
+		getLevelRangeOverrides: () => new Map(),
 		getDynamicVariableValue: () => undefined,
 		setFeedbackDefinitions: (value) => {
 			definitions = value
@@ -157,6 +241,7 @@ test('publishes a normalized level variable after learning the Tesira range', ()
 		levelVariableInstanceTags: new Map([['level_1', 'Level1']]),
 		lastResponseNumeric: '',
 		getLiveLevelRange: () => ({ min: -40, max: 0 }),
+		getLevelRangeOverrides: ModuleInstance.prototype.getLevelRangeOverrides,
 		ensureVariable: () => undefined,
 		storeScaledLevelValue: ModuleInstance.prototype.storeScaledLevelValue,
 		updateVariables: () => undefined,
@@ -172,6 +257,7 @@ test('publishes an initial level gauge value before live range discovery', () =>
 		config: { levelRangeOverrides: 'OverrideLevel=-40:0' },
 		dynamicVariableValues: values,
 		getLiveLevelRange: () => undefined,
+		getLevelRangeOverrides: ModuleInstance.prototype.getLevelRangeOverrides,
 		ensureVariable: () => undefined,
 	}
 
@@ -193,6 +279,7 @@ test('only probes live min and max bounds for level controls', () => {
 	const commands = []
 	const instance = {
 		getLiveLevelRange: () => undefined,
+		getLevelRangeOverrides: () => new Map(),
 		addPollingCommand: (...args) => commands.push(args),
 		doPolling: () => undefined,
 	}
@@ -215,6 +302,7 @@ test('uses scalable native gauges below image and text layers in Companion 5 pre
 		getAliases: () => ['Lobby_Level', 'Lobby_Meter', 'Lobby_GainReduction', 'PeakMeter1'],
 		getLiveLevelRange: () => undefined,
 		getLiveMeterRange: () => undefined,
+		getLevelRangeOverrides: () => new Map(),
 		getDynamicVariableValue: () => undefined,
 		setPresetDefinitions: (sections, value) => {
 			structure = sections
@@ -262,7 +350,19 @@ test('uses scalable native gauges below image and text layers in Companion 5 pre
 	assert.equal(levelText.text.isExpression, true)
 	assert.match(levelText.text.value, /toFixed\(.+, 1\)/)
 	assert.match(levelText.text.value, /' dB'/)
-	assert.equal(definitions.manual_refresh.style.size, '15')
+	assert.equal(definitions.manual_refresh.style.size, 15)
+	for (const preset of Object.values(definitions)) {
+		if (preset.type !== 'simple' || preset.style?.size === undefined) continue
+		const size = preset.style.size
+		assert.ok(size === 'auto' || Number.isFinite(size), `${preset.name}: invalid text size ${size}`)
+	}
+
+	const sectionNames = structure.map((section) => section.name)
+	assert.deepEqual(
+		sectionNames,
+		[...sectionNames].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+	)
+	assert.equal(new Set(structure.map((section) => section.id)).size, structure.length)
 
 	const knobLevelGauge = definitions.manual_level_rotary.elements.find((element) => element.id === 'tesira-level-gauge')
 	assert.equal(knobLevelGauge.opacity, 60)
@@ -300,4 +400,41 @@ test('uses scalable native gauges below image and text layers in Companion 5 pre
 		(override) => override.elementId === 'tesira-background' && override.elementProperty === 'color',
 	)
 	assert.deepEqual(backgroundOverride.override, { isExpression: false, value: 0xb40000 })
+})
+
+test('stops answering login prompts after the welcome banner and after a rejected password', () => {
+	const sent = []
+	const statuses = []
+	const socket = { isConnected: true, send: (data) => sent.push(data) }
+	const instance = {
+		config: { loginUsername: 'admin' },
+		secrets: { loginPassword: 'secret' },
+		log: () => undefined,
+		updateVariables: () => undefined,
+		syncConnectionStatus: (status, message) => statuses.push([status, message]),
+	}
+	const respond = (buffer, login) =>
+		ModuleInstance.prototype.respondToLoginPrompt.call(instance, buffer, socket, 'command', login)
+	const newLogin = () => ({ welcomed: false, prompts: { username: 0, password: 0 }, failed: false })
+
+	// Complete lines received before the prompt are kept
+	let login = newLogin()
+	assert.equal(respond('banner line\nlogin: ', login), 'banner line\n')
+	assert.equal(respond('Password: ', login), '')
+	assert.deepEqual(sent, ['admin\n', 'secret\n'])
+
+	// After the welcome banner, data ending in "password:" is not a prompt
+	login.welcomed = true
+	assert.equal(respond('"label":"Enter password: ', login), '"label":"Enter password: ')
+	assert.equal(sent.length, 2)
+
+	// A second password prompt means the password was rejected
+	login = newLogin()
+	respond('Password: ', login)
+	respond('Password: ', login)
+	assert.equal(login.failed, true)
+	assert.equal(statuses.at(-1)[0], 'authentication_failure')
+	assert.equal(sent.length, 3)
+	assert.equal(respond('Password: ', login), '')
+	assert.equal(sent.length, 3)
 })

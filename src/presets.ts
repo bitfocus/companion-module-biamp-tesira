@@ -1,7 +1,6 @@
 import { combineRgb } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
 import { TESIRA_METER_SCALE } from './meter-scale.js'
-import { parseRangeOverrides } from './range-overrides.js'
 
 function sanitizeVariableName(value: string): string {
 	return value
@@ -229,7 +228,12 @@ function convertPresetsForCompanion5(legacyPresets: Record<string, any>): {
 		if (gaugeFeedbacks.length === 0) {
 			const { category: _category, options, ...preset } = legacy
 			const style = { ...preset.style }
-			if (style.size !== undefined) style.size = String(Number(style.size) + 1)
+			// Companion 5 renders text slightly smaller, so bump numeric sizes by one point.
+			// Keep 'auto' (and anything non-numeric) as is; numeric sizes are passed as numbers.
+			if (style.size !== undefined && style.size !== 'auto') {
+				const size = Number(style.size)
+				if (Number.isFinite(size)) style.size = size + 1
+			}
 			presets[id] = {
 				...preset,
 				type: 'simple',
@@ -303,13 +307,23 @@ function convertPresetsForCompanion5(legacyPresets: Record<string, any>): {
 	}
 
 	return {
-		structure: [...sections].map(([name, definitions], index) => ({
-			id: `tesira-${index + 1}`,
-			name,
-			definitions,
-		})),
+		structure: [...sections]
+			.sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+			.map(([name, definitions]) => ({
+				id: `tesira-${sectionSlug(name)}`,
+				name,
+				definitions,
+			})),
 		presets,
 	}
+}
+
+/** Stable section id derived from the category name, so ids don't shift when discovered tags change */
+function sectionSlug(name: string): string {
+	return name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-|-$/g, '')
 }
 
 function parsePairOverrides(raw: string): Map<string, string> {
@@ -411,7 +425,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const CATEGORY_TALK = '11 Talk (momentary unmute) (Discovered)'
 	const CATEGORY_LATCH_TALK = '12 Latching Talk (Discovered)'
 	const pairOverrides = parsePairOverrides(self.config.pairOverrides ?? '')
-	const rangeOverrides = parseRangeOverrides(self.config.levelRangeOverrides ?? '')
+	const rangeOverrides = self.getLevelRangeOverrides()
 	const sourceSelectorNames = parseSourceSelectorNames(self.config.sourceSelectorNames ?? '')
 	const aliases = self.getAliases()
 	const manualLevelAlias = 'InstanceTag'
