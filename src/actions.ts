@@ -58,7 +58,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const presetId = (await self.parseVariablesInString(String(action.options.presetId ?? ''))).trim()
+				const presetId = String(action.options.presetId ?? '').trim()
 				if (!presetId) throw new Error('Preset ID is required')
 				self.sendCommand(`DEVICE recallPreset ${presetId}`)
 			},
@@ -96,9 +96,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const channel = (await self.parseVariablesInString(String(action.options.channel ?? ''))).trim()
-				const level = (await self.parseVariablesInString(String(action.options.level ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const channel = String(action.options.channel ?? '').trim()
+				const level = String(action.options.level ?? '').trim()
 				self.sendCommand(buildCommandParts(instanceTag, 'set', 'level', channel, level))
 			},
 		},
@@ -138,9 +138,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const channel = (await self.parseVariablesInString(String(action.options.channel ?? ''))).trim()
-				const amount = (await self.parseVariablesInString(String(action.options.amount ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const channel = String(action.options.channel ?? '').trim()
+				const amount = String(action.options.amount ?? '').trim()
 				self.sendCommand(
 					buildCommandParts(instanceTag, String(action.options.command ?? 'increment'), 'level', channel, amount),
 				)
@@ -190,9 +190,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const channel = (await self.parseVariablesInString(String(action.options.channel ?? ''))).trim()
-				const amount = (await self.parseVariablesInString(String(action.options.amount ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const channel = String(action.options.channel ?? '').trim()
+				const amount = String(action.options.amount ?? '').trim()
 				const command = String(action.options.command ?? 'increment') === 'decrement' ? 'decrement' : 'increment'
 				self.startLevelHold(instanceTag, channel, command, amount, Number(action.options.intervalMs ?? 150))
 			},
@@ -234,8 +234,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const channel = (await self.parseVariablesInString(String(action.options.channel ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const channel = String(action.options.channel ?? '').trim()
 				const state = String(action.options.state ?? 'toggle')
 				if (state === 'toggle') {
 					self.sendCommand(buildCommandParts(instanceTag, 'toggle', 'mute', channel))
@@ -270,9 +270,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const output = (await self.parseVariablesInString(String(action.options.output ?? ''))).trim()
-				const source = (await self.parseVariablesInString(String(action.options.source ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const output = String(action.options.output ?? '').trim()
+				const source = String(action.options.source ?? '').trim()
 				if (!instanceTag || !output || !source) throw new Error('Instance tag, output, and source are required')
 				self.sendCommand(buildCommandParts(instanceTag, 'set', 'sourceSelection', output, source))
 			},
@@ -315,9 +315,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const input = (await self.parseVariablesInString(String(action.options.input ?? ''))).trim()
-				const output = (await self.parseVariablesInString(String(action.options.output ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const input = String(action.options.input ?? '').trim()
+				const output = String(action.options.output ?? '').trim()
 				const state = String(action.options.state ?? 'true')
 				if (!instanceTag || !input || !output) throw new Error('Instance tag, input, and output are required')
 
@@ -375,11 +375,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const input = (await self.parseVariablesInString(String(action.options.input ?? ''))).trim()
-				const output = (await self.parseVariablesInString(String(action.options.output ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const input = String(action.options.input ?? '').trim()
+				const output = String(action.options.output ?? '').trim()
 				const command = String(action.options.command ?? 'set')
-				const level = (await self.parseVariablesInString(String(action.options.level ?? ''))).trim()
+				const level = String(action.options.level ?? '').trim()
 				if (!instanceTag || !input || !output) throw new Error('Instance tag, input, and output are required')
 				if (command !== 'get' && !level) throw new Error('Level / amount is required')
 
@@ -448,11 +448,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const attribute = (await self.parseVariablesInString(String(action.options.attribute ?? ''))).trim()
-				const index1 = (await self.parseVariablesInString(String(action.options.index1 ?? ''))).trim()
-				const index2 = (await self.parseVariablesInString(String(action.options.index2 ?? ''))).trim()
-				const value = (await self.parseVariablesInString(String(action.options.value ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const attribute = String(action.options.attribute ?? '').trim()
+				const index1 = String(action.options.index1 ?? '').trim()
+				const index2 = String(action.options.index2 ?? '').trim()
+				const value = String(action.options.value ?? '').trim()
 				const command = String(action.options.command ?? 'get')
 				const finalCommand = buildCommandParts(instanceTag, command, attribute, index1, index2, value)
 				self.sendCommand(finalCommand)
@@ -476,7 +476,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const command = (await self.parseVariablesInString(String(action.options.command ?? ''))).trim()
+				const command = String(action.options.command ?? '').trim()
 				if (!command) throw new Error('Command cannot be empty')
 				self.trackRawSubscriptionCommand(command, Boolean(action.options.roundNumericSubscriptions))
 				self.sendCommand(command)
@@ -549,15 +549,15 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
 				const templateId = String(action.options.templateId ?? 'custom')
 				const template = getTemplateById(templateId)
-				const customAttribute = (await self.parseVariablesInString(String(action.options.customAttribute ?? ''))).trim()
+				const customAttribute = String(action.options.customAttribute ?? '').trim()
 				const attribute = template?.attribute ?? customAttribute
-				const index1 = (await self.parseVariablesInString(String(action.options.index1 ?? ''))).trim()
-				const index2 = (await self.parseVariablesInString(String(action.options.index2 ?? ''))).trim()
+				const index1 = String(action.options.index1 ?? '').trim()
+				const index2 = String(action.options.index2 ?? '').trim()
 				const variableName = String(action.options.variableName ?? '').trim()
-				const resolvedRate = (await self.parseVariablesInString(String(action.options.rate ?? ''))).trim()
+				const resolvedRate = String(action.options.rate ?? '').trim()
 				const rate = resolvedRate || String(self.config.defaultSubscriptionRate ?? 500)
 				if (!instanceTag || !attribute || !variableName) {
 					throw new Error('Instance tag, attribute, and variable name are required')
@@ -613,10 +613,10 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const instanceTag = (await self.parseVariablesInString(String(action.options.instanceTag ?? ''))).trim()
-				const attribute = (await self.parseVariablesInString(String(action.options.attribute ?? ''))).trim()
-				const index1 = (await self.parseVariablesInString(String(action.options.index1 ?? ''))).trim()
-				const index2 = (await self.parseVariablesInString(String(action.options.index2 ?? ''))).trim()
+				const instanceTag = String(action.options.instanceTag ?? '').trim()
+				const attribute = String(action.options.attribute ?? '').trim()
+				const index1 = String(action.options.index1 ?? '').trim()
+				const index2 = String(action.options.index2 ?? '').trim()
 				const variableName = String(action.options.variableName ?? '').trim()
 				if (!variableName) throw new Error('Variable name is required')
 				self.unsubscribeFromAttribute({ instanceTag, attribute, index1, index2, variableName })
@@ -646,7 +646,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const command = (await self.parseVariablesInString(String(action.options.command ?? ''))).trim()
+				const command = String(action.options.command ?? '').trim()
 				const variableName = String(action.options.variableName ?? '').trim()
 				self.addPollingCommand(command, variableName, Boolean(action.options.roundNumericValues), false)
 			},
@@ -675,7 +675,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 			],
 			callback: async (action) => {
-				const command = (await self.parseVariablesInString(String(action.options.command ?? ''))).trim()
+				const command = String(action.options.command ?? '').trim()
 				const variableName = String(action.options.variableName ?? '').trim()
 				self.addPollingCommand(command, variableName, Boolean(action.options.roundNumericValues), true)
 			},

@@ -12,10 +12,10 @@ import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
-import { detectLoginPrompt } from './login-prompt.js'
+import { detectLoginPrompt, type LoginPrompt } from './login-prompt.js'
 import { scaleTesiraLevelValue, scaleTesiraMeterValue } from './meter-scale.js'
 import { formatConnectionStatus } from './connection-status.js'
-import { parseRangeOverrides } from './range-overrides.js'
+import { parseRangeOverrides, type LevelRange } from './range-overrides.js'
 
 interface TrackedSubscription {
 	cmd: string
@@ -55,6 +55,8 @@ interface SubscribeRequest {
 	rate?: string
 	roundNumericValues: boolean
 	getInitial: boolean
+	/** Set when the caller knows the tag type, instead of guessing it from the tag name */
+	kind?: 'meter' | 'level'
 }
 
 interface UnsubscribeRequest {
@@ -111,6 +113,19 @@ function normalizeNumericText(value: string, roundNumericValues: boolean): strin
 	return roundNumericValues ? String(Math.round(parsed)) : String(parsed)
 }
 
+interface LoginState {
+	/** The Tesira welcome banner has been seen, so the session is logged in */
+	welcomed: boolean
+	/** Login prompts answered on this connection, by prompt type */
+	prompts: Record<LoginPrompt, number>
+	/** The device rejected the credentials; stop answering until reconnect / config change */
+	failed: boolean
+}
+
+function newLoginState(): LoginState {
+	return { welcomed: false, prompts: { username: 0, password: 0 }, failed: false }
+}
+
 function inferRangeProbeTarget(instanceTag: string, attribute: string): 'level' | 'meter' | 'generic' {
 	const alias = instanceTag.toLowerCase()
 	const attr = attribute.toLowerCase()
@@ -148,6 +163,8 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	private pollSocket: TelnetHelper | undefined
 	private commandReady = false
 	private pollingReady = false
+	private commandLogin = newLoginState()
+	private pollLogin = newLoginState()
 	private pollTimer: NodeJS.Timeout | undefined
 	private levelHoldTimer: NodeJS.Timeout | undefined
 	private pollQueue: PendingPoll[] = []
@@ -167,14 +184,10 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	private liveAliasRanges = new Map<string, { min?: number; max?: number }>()
 	private liveLevelRanges = new Map<string, { min?: number; max?: number }>()
 	private liveMeterRanges = new Map<string, { min?: number; max?: number }>()
+	private rangeOverridesCache?: { raw: string; ranges: Map<string, LevelRange> }
 
 	constructor(internal: unknown) {
 		super(internal)
-	}
-
-	// API 2 resolves useVariables options before invoking action callbacks.
-	async parseVariablesInString(value: string): Promise<string> {
-		return value
 	}
 
 	async init(config: ModuleConfig, _isFirstInit: boolean, secrets: ModuleSecrets): Promise<void> {
@@ -195,7 +208,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 
 	async configUpdated(config: ModuleConfig, secrets: ModuleSecrets): Promise<void> {
 		this.config = config
-		this.secrets = secrets ?? {}
+		this.secrets = secrets ?? { loginPassword: '' }
 		this.syncStartupSubscriptions()
 		this.updateActions()
 		this.updateFeedbacks()
@@ -223,6 +236,15 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 
 	getAliases(): string[] {
 		return [...this.aliases]
+	}
+
+	/** Level range overrides from the config, parsed once per config value */
+	getLevelRangeOverrides(): Map<string, LevelRange> {
+		const raw = this.config?.levelRangeOverrides ?? ''
+		if (this.rangeOverridesCache?.raw !== raw) {
+			this.rangeOverridesCache = { raw, ranges: parseRangeOverrides(raw) }
+		}
+		return this.rangeOverridesCache.ranges
 	}
 
 	getLiveLevelRange(instanceTag: string): { min: number; max: number } | undefined {
@@ -553,7 +575,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 		// Their display ranges are fixed in the presets; only probe actual level controls.
 		if (!instanceTag || target !== 'level') return
 		if (this.getLiveLevelRange(instanceTag)) return
-		if (parseRangeOverrides(this.config?.levelRangeOverrides ?? '').has(instanceTag)) return
+		if (this.getLevelRangeOverrides().has(instanceTag)) return
 
 		this.addPollingCommand(`${instanceTag} get minLevel 1`, `${instanceTag}_minLevel_1`, false, true, {
 			instanceTag,
@@ -591,10 +613,11 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 		)
 
 		this.ensureVariable(request.variableName)
-		if (
-			request.attribute.toLowerCase().includes('level') &&
-			inferRangeProbeTarget(request.instanceTag, request.attribute) === 'level'
-		) {
+		const isLevelControl =
+			request.kind !== undefined
+				? request.kind === 'level'
+				: inferRangeProbeTarget(request.instanceTag, request.attribute) === 'level'
+		if (request.attribute.toLowerCase().includes('level') && isLevelControl) {
 			this.levelVariableInstanceTags.set(variableId, request.instanceTag.trim())
 			this.ensureVariable(`${variableId}_scaled`)
 		}
@@ -654,12 +677,14 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	private initCommandSocket(): void {
 		let receiveBuffer = ''
 
+		this.commandLogin = newLoginState()
 		this.socket = new TelnetHelper(this.config.host.trim(), this.config.port || 23)
 
 		this.socket.on('status_change', (status: unknown, message: unknown) => {
 			this.log('debug', `Tesira command socket: ${String(status)} ${String(message)}`)
 			const detail = typeof message === 'string' ? message : undefined
 			if (status === InstanceStatus.Ok) {
+				this.commandLogin = newLoginState()
 				this.syncConnectionStatus(InstanceStatus.Connecting, 'Waiting for command socket login')
 			} else if (status === InstanceStatus.Connecting) {
 				this.commandReady = false
@@ -692,7 +717,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 
 		this.socket.on('data', (buffer: Buffer) => {
 			receiveBuffer += buffer.toString('utf-8')
-			receiveBuffer = this.respondToLoginPrompt(receiveBuffer, this.socket, 'command')
+			receiveBuffer = this.respondToLoginPrompt(receiveBuffer, this.socket, 'command', this.commandLogin)
 			const lines = receiveBuffer.split('\n')
 			receiveBuffer = lines.pop() ?? ''
 			for (const rawLine of lines) {
@@ -710,12 +735,14 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	private initPollingSocket(): void {
 		let receiveBuffer = ''
 
+		this.pollLogin = newLoginState()
 		this.pollSocket = new TelnetHelper(this.config.host.trim(), this.config.port || 23)
 
 		this.pollSocket.on('status_change', (status: unknown, message: unknown) => {
 			this.log('debug', `Tesira polling socket: ${String(status)} ${String(message)}`)
 			const detail = typeof message === 'string' ? message : undefined
 			if (status === InstanceStatus.Ok) {
+				this.pollLogin = newLoginState()
 				this.syncConnectionStatus(
 					this.commandReady ? InstanceStatus.UnknownWarning : InstanceStatus.Connecting,
 					'Waiting for polling socket login',
@@ -769,7 +796,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 
 		this.pollSocket.on('data', (buffer: Buffer) => {
 			receiveBuffer += buffer.toString('utf-8')
-			receiveBuffer = this.respondToLoginPrompt(receiveBuffer, this.pollSocket, 'polling')
+			receiveBuffer = this.respondToLoginPrompt(receiveBuffer, this.pollSocket, 'polling', this.pollLogin)
 			const lines = receiveBuffer.split('\n')
 			receiveBuffer = lines.pop() ?? ''
 			for (const rawLine of lines) {
@@ -784,9 +811,32 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 		})
 	}
 
-	private respondToLoginPrompt(buffer: string, socket: TelnetHelper | undefined, socketName: string): string {
+	private respondToLoginPrompt(
+		buffer: string,
+		socket: TelnetHelper | undefined,
+		socketName: string,
+		login: LoginState,
+	): string {
+		// Login prompts only appear before the welcome banner; after that, data is never a prompt
+		if (login.welcomed) return buffer
+		// Credentials were rejected: ignore everything until the next reconnect or config change
+		if (login.failed) return ''
+
 		const prompt = detectLoginPrompt(buffer)
 		if (!prompt || !socket?.isConnected) return buffer
+
+		// Keep any complete lines that arrived before the prompt
+		const lastNewline = buffer.lastIndexOf('\n')
+		const remaining = lastNewline >= 0 ? buffer.slice(0, lastNewline + 1) : ''
+
+		login.prompts[prompt] += 1
+		if (login.prompts[prompt] > 1) {
+			login.failed = true
+			this.lastError = `Tesira ${socketName} socket login failed: check the login username and password`
+			this.log('error', this.lastError)
+			this.syncConnectionStatus(InstanceStatus.AuthenticationFailure, this.lastError)
+			return remaining
+		}
 
 		if (prompt === 'username') {
 			const username = this.config.loginUsername?.trim() || 'default'
@@ -794,19 +844,15 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 			this.log('debug', `Sent Tesira ${socketName} socket login username`)
 			void socket.send(`${username}\n`)
 			this.updateVariables()
-			return ''
+			return remaining
 		}
 
-		if (prompt === 'password') {
-			const password = this.secrets.loginPassword ?? 'default'
-			this.lastCommand = 'login password'
-			this.log('debug', `Sent Tesira ${socketName} socket login password`)
-			void socket.send(`${password}\n`)
-			this.updateVariables()
-			return ''
-		}
-
-		return buffer
+		const password = this.secrets.loginPassword ?? ''
+		this.lastCommand = 'login password'
+		this.log('debug', `Sent Tesira ${socketName} socket login password`)
+		void socket.send(`${password}\n`)
+		this.updateVariables()
+		return remaining
 	}
 
 	private handleCommandLine(line: string): void {
@@ -814,6 +860,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 		if (this.config.logResponses) this.log('debug', `Tesira response: ${line}`)
 
 		if (line.includes('Welcome to the Tesira Text Protocol Server')) {
+			this.commandLogin.welcomed = true
 			this.commandReady = true
 			this.syncConnectionStatus(InstanceStatus.UnknownWarning, 'Waiting for polling socket login')
 			if (this.config.autoFetchAliases) this.sendCommand('SESSION get aliases')
@@ -857,8 +904,9 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 	private handlePollingLine(line: string): void {
 		if (this.config.logResponses) this.log('debug', `Tesira poll response: ${line}`)
 		if (line.includes('Welcome to the Tesira Text Protocol Server')) {
+			this.pollLogin.welcomed = true
 			this.pollingReady = true
-			this.syncConnectionStatus(InstanceStatus.Connecting)
+			this.syncConnectionStatus(InstanceStatus.Connecting, 'Waiting for command socket login')
 			this.startPollingTimer()
 			return
 		}
@@ -906,6 +954,10 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 		this.ensureVariable('aliases_list')
 		this.dynamicVariableValues.set('aliases_list', this.aliasList)
 		this.updatePresets()
+		// The learned ranges were cleared above; ask again for every subscribed level control
+		for (const instanceTag of new Set(this.levelVariableInstanceTags.values())) {
+			this.queueRangeProbeForInstance(instanceTag, 'level')
+		}
 	}
 
 	private parseOkValue(line: string, pending: PendingPoll | undefined): void {
@@ -1007,7 +1059,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 
 	private storeScaledLevelValue(variableId: string, instanceTag: string, rawValue: string): void {
 		const range = this.getLiveLevelRange(instanceTag) ??
-			parseRangeOverrides(this.config?.levelRangeOverrides ?? '').get(instanceTag) ?? { min: -100, max: 12 }
+			this.getLevelRangeOverrides().get(instanceTag) ?? { min: -100, max: 12 }
 		const scaledName = `${variableId}_scaled`
 		this.ensureVariable(scaledName)
 		this.dynamicVariableValues.set(scaledName, String(scaleTesiraLevelValue(rawValue, range.min, range.max)))
@@ -1088,6 +1140,7 @@ export class ModuleInstance extends InstanceBase<ModuleTypes> {
 				rate: this.startupMeterSubscriptionRateMs,
 				roundNumericValues: false,
 				getInitial: false,
+				kind: 'meter',
 			})
 			this.startupSubscriptionIds.add(sanitizeVariableId(meterVariable))
 		}

@@ -1,5 +1,6 @@
 import type {
 	CompanionMigrationAction,
+	CompanionMigrationOptionValues,
 	CompanionStaticUpgradeProps,
 	CompanionStaticUpgradeResult,
 	CompanionStaticUpgradeScript,
@@ -22,22 +23,45 @@ const actionIdMap: Record<string, string> = {
 	unsubscribeParameter: 'unsubscribe_helper',
 }
 
-function asMutableOptions(action: CompanionMigrationAction): Record<string, unknown> {
-	return action.options as Record<string, unknown>
+type OptionValue = CompanionMigrationOptionValues[string]
+type PlainValue = string | number | boolean | null | undefined
+
+function asMutableOptions(action: CompanionMigrationAction): CompanionMigrationOptionValues {
+	return action.options
 }
 
-function renameOption(options: Record<string, unknown>, from: string, to: string): boolean {
+/**
+ * Companion 5 hands upgrade scripts every option as `{ isExpression, value }`.
+ * Returns the plain value of a non-expression option, or `undefined` when the option is
+ * missing or is an expression (which must be left alone).
+ * Bare values (older data that was never wrapped) are tolerated as well.
+ */
+function readPlainValue(option: OptionValue | PlainValue): { value: unknown } | undefined {
+	if (option === undefined || option === null) return undefined
+	if (typeof option === 'object' && !Array.isArray(option) && 'isExpression' in option) {
+		if (option.isExpression) return undefined
+		return { value: option.value }
+	}
+	return { value: option }
+}
+
+function wrapValue<T extends string | number | boolean>(value: T): OptionValue {
+	return { isExpression: false, value }
+}
+
+function renameOption(options: CompanionMigrationOptionValues, from: string, to: string): boolean {
 	if (options[from] === undefined || options[to] !== undefined) return false
 	options[to] = options[from]
 	delete options[from]
 	return true
 }
 
-function stringifyOption(options: Record<string, unknown>, key: string): boolean {
-	if (options[key] === undefined || typeof options[key] === 'string') return false
-	const value = options[key]
-	if (typeof value !== 'number' && typeof value !== 'boolean' && typeof value !== 'bigint') return false
-	options[key] = String(value)
+function stringifyOption(options: CompanionMigrationOptionValues, key: string): boolean {
+	const plain = readPlainValue(options[key])
+	if (!plain) return false
+	const value = plain.value
+	if (typeof value !== 'number' && typeof value !== 'boolean') return false
+	options[key] = wrapValue(String(value))
 	return true
 }
 
@@ -66,10 +90,13 @@ function remapActionSpecificOptions(action: CompanionMigrationAction): boolean {
 	switch (action.actionId) {
 		case 'level_hold_start':
 			changed = renameOption(options, 'rate', 'intervalMs') || changed
-			if (options.intervalMs !== undefined) {
-				const interval = Number(options.intervalMs)
-				options.intervalMs = Number.isFinite(interval) ? interval : 500
-				changed = true
+			{
+				const plain = readPlainValue(options.intervalMs)
+				if (plain) {
+					const interval = Number(plain.value)
+					options.intervalMs = wrapValue(plain.value !== '' && Number.isFinite(interval) ? interval : 500)
+					changed = true
+				}
 			}
 			break
 		case 'raw_command':
@@ -81,15 +108,6 @@ function remapActionSpecificOptions(action: CompanionMigrationAction): boolean {
 			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
 			break
 		case 'subscribe_helper':
-			if (options.attribute !== undefined) {
-				options.templateId = 'custom'
-				options.customAttribute = options.attribute
-				delete options.attribute
-				changed = true
-			}
-			if (options.index1 !== undefined) changed = stringifyOption(options, 'index1') || changed
-			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
-			break
 		case 'unsubscribe_helper':
 			if (options.index1 !== undefined) changed = stringifyOption(options, 'index1') || changed
 			if (options.variableName !== undefined) changed = stringifyOption(options, 'variableName') || changed
@@ -128,6 +146,55 @@ function upgradeV2ActionIds(
 	}
 }
 
+/** Template ids written by v3 presets/defaults that never matched a dropdown choice */
+const legacyTemplateIdMap: Record<string, string> = {
+	audio_meter_peak_rms__level: 'audio_meter_peak_rms___level',
+	audio_meter_peak_rms__alllevels: 'audio_meter_peak_rms___alllevels',
+}
+
+/**
+ * v4: move the legacy `attribute` option of Custom attribute subscription buttons into the
+ * template/custom attribute fields, and correct template ids that never matched a choice.
+ * This is a separate script so that connections which already ran the v3 script still get it.
+ */
+function upgradeV4SubscriptionTemplates(
+	_context: CompanionUpgradeContext<ModuleConfig>,
+	props: CompanionStaticUpgradeProps<ModuleConfig, ModuleSecrets | undefined>,
+): CompanionStaticUpgradeResult<ModuleConfig, ModuleSecrets | undefined> {
+	const updatedActions: CompanionMigrationAction[] = []
+
+	for (const action of props.actions) {
+		if (action.actionId !== 'subscribe_helper') continue
+		const options = asMutableOptions(action)
+		let changed = false
+
+		if (options.attribute !== undefined) {
+			if (options.customAttribute === undefined) {
+				options.templateId = wrapValue('custom')
+				options.customAttribute = options.attribute
+			}
+			delete options.attribute
+			changed = true
+		}
+
+		const template = readPlainValue(options.templateId)
+		if (template && typeof template.value === 'string' && legacyTemplateIdMap[template.value]) {
+			options.templateId = wrapValue(legacyTemplateIdMap[template.value])
+			changed = true
+		}
+
+		if (changed) updatedActions.push(action)
+	}
+
+	return {
+		updatedConfig: null,
+		updatedSecrets: null,
+		updatedActions,
+		updatedFeedbacks: [],
+	}
+}
+
 export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig, ModuleSecrets | undefined>[] = [
 	upgradeV2ActionIds,
+	upgradeV4SubscriptionTemplates,
 ]
